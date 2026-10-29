@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit
+.env
+
+# Local data (indexes contain copies of repo code)
+data/
+
+# Build output
+dist/
