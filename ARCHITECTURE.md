@@ -75,8 +75,10 @@ project-2/
 ├── package.json                  # npm workspaces: server, web
 ├── server/
 │   ├── src/
-│   │   ├── index.ts              # Express app and routes only
+│   │   ├── index.ts              # entry point: checks settings, starts the server
+│   │   ├── app.ts                # Express app: routes + error handler (tests import this)
 │   │   ├── config.ts             # env loading, constants, model tags
+│   │   ├── errors.ts             # AppError: errors with a user-safe message
 │   │   ├── types.ts              # Repo, SourceFile, Chunk, Manifest, Source, IndexJob
 │   │   ├── githubClient.ts
 │   │   ├── ingestion.ts          # zip → filtered SourceFiles
@@ -385,15 +387,22 @@ Settings in `.env`:
 
 ## 17. Decision log
 
+The reasoning behind each decision is in [DECISIONS.md](DECISIONS.md).
+
 | # | Decision | Status |
 |---|---|---|
 | D1 | Node.js + TypeScript: Express API + React (Vite) UI; logic in modules that don't import Express | Approved (replaces Python + Streamlit) |
 | D2 | Light/dark toggle in the app header (CSS variables + `localStorage`) | Approved (replaces the Streamlit Settings menu) |
-| D3 | Self-hosted Qwen via Ollama for chat; size chosen per hardware | Approved (replaces Gemini Flash) |
-| D4 | Qwen3-Embedding via Ollama for embeddings | Approved (replaces the Gemini embedding API) |
+| D3 | Self-hosted Qwen via Ollama for chat; size chosen per hardware | **Pending** senior confirmation (replaces Gemini Flash) |
+| D4 | Qwen3-Embedding via Ollama for embeddings | **Pending** senior confirmation (replaces the Gemini embedding API) |
 | D5 | LanceDB (embedded), one table per repo | Approved (replaces ChromaDB) |
 | D6 | No LangChain or LlamaIndex | Approved |
 | D7 | Follow-up query rewriting; README + file tree always in the prompt | Approved |
 | D8 | Hybrid chunking: tree-sitter for Python/JS/TS/Java/Go + line fallback, with a retrieval comparison | **Proposed** |
 | D9 | Repos listed from a fine-grained token (`/user/repos`), private repos supported, paste-a-URL input; no username field | Approved |
 | D10 | No relational DB in the MVP, so no ERD; data model in §9. ERD to be drawn when chat history is saved. | Approved |
+| D11 | Target users: CTOs and engineering leadership | Approved |
+| D12 | Answers start with a plain-language summary | Approved |
+| D13 | Ollama to run Qwen locally | **Pending** senior confirmation |
+| D14 | Local only, single user, no login | Approved |
+| D15 | Fine-grained, read-only GitHub token (not classic); org access method to be decided | Approved for MVP; org access **Pending** |

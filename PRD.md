@@ -203,8 +203,9 @@ General-purpose chatbots don't know a specific repository's code and will often 
 
 ## 10. Open items
 
+- **LLM confirmation:** self-hosted Qwen run with Ollama is waiting for senior confirmation (see [DECISIONS.md](DECISIONS.md) D3, D4, D13).
 - **Hardware for Qwen:** which machine runs the model (a developer laptop or a shared GPU workstation), and how much GPU memory it has. This decides the model size and whether NFR-6 can be met.
 - **Qwen model size:** chosen once the hardware is known (see ARCHITECTURE.md §8).
-- **Organisation token approval:** some GitHub organisations require an admin to approve fine-grained tokens before they can read org repos. Confirm this with the org admin.
+- **Organisation repo access:** a fine-grained token covers one owner (a user or one org). Seniors need to decide how the app reaches company org repos: an org-owned token, several tokens, a GitHub App, or a classic token (see [DECISIONS.md](DECISIONS.md) D15). Some orgs also require an admin to approve fine-grained tokens.
 - **Local storage of private code:** indexes in `data/` contain copies of private code. Confirm this is acceptable under company policy.
 - **Product Owner re-approval** of this v1.1.
