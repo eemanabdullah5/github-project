@@ -14,7 +14,7 @@ const info = await getRepo(owner, repo);
 checkRepoSize(info);
 const sha = await getLatestCommitSha(owner, repo, info.defaultBranch);
 const files = extractSourceFiles(await downloadZipball(owner, repo, sha));
-const chunks = files.flatMap(chunkFile);
+const chunks = (await Promise.all(files.map(chunkFile))).flat();
 
 console.log(`${owner}/${repo} @ ${sha.slice(0, 7)}: ${files.length} files, ${chunks.length} chunks\n`);
 console.log("Files:", files.map((f) => f.path).join(", "), "\n");
