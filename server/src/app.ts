@@ -1,27 +1,126 @@
-// Builds the Express app. Route handlers stay thin: read inputs, call a module,
-// send the result. Kept separate from index.ts so tests can start the app on any port.
+// Builds the Express app: the HTTP API from ARCHITECTURE §4.2.
+// Route handlers stay thin: read the inputs, call a module, send the result.
+// Kept separate from index.ts so tests can start the app on any port.
+import { existsSync } from "node:fs";
+import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { ROOT_DIR } from "./config.js";
 import { AppError } from "./errors.js";
+import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
+import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
+import { answer } from "./rag.js";
+import type { ChatMessage, Repo } from "./types.js";
+
+/** The repo list, kept in memory so we don't ask GitHub again on every page load. */
+let repoCache: Repo[] | null = null;
+
+/** Reads :owner and :repo from the URL and checks they are valid GitHub names. */
+function repoParams(req: Request): { owner: string; repo: string } {
+  return parseRepoUrl(`${req.params.owner}/${req.params.repo}`);
+}
 
 export function createApp() {
   const app = express();
   app.use(express.json());
 
+  // Simple check that the server is up.
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
+
+  // All repos the token can access. ?refresh=1 asks GitHub again instead of using the cache.
+  app.get("/api/repos", async (req, res) => {
+    if (!repoCache || req.query.refresh === "1") {
+      repoCache = await listAccessibleRepos();
+    }
+    res.json(repoCache);
+  });
+
+  // One repo, looked up by owner/name (used by the paste-a-URL box).
+  app.get("/api/repos/:owner/:repo", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await getRepo(owner, repo));
+  });
+
+  // Whether the repo's index is missing, fresh or stale, plus a short summary of it.
+  app.get("/api/repos/:owner/:repo/status", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const { status, manifest } = await checkIndexStatus(owner, repo);
+    res.json({
+      status,
+      manifest: manifest && {
+        commitSha: manifest.commitSha,
+        branch: manifest.branch,
+        indexedAt: manifest.indexedAt,
+        fileCount: manifest.fileCount,
+        chunkCount: manifest.chunkCount,
+      },
+    });
+  });
+
+  // Starts indexing in the background. Returns 409 if another job is already running.
+  app.post("/api/repos/:owner/:repo/index", (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.status(202).json(startIndexJob(owner, repo));
+  });
+
+  // The current indexing job, for the progress panel (polled every second).
+  app.get("/api/index-job", (_req, res) => {
+    res.json(getJob());
+  });
+
+  // Chat: streams the answer as Server-Sent Events: "sources", then many "token", then "done" (or "error").
+  app.post("/api/repos/:owner/:repo/chat", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
+    const history: ChatMessage[] = Array.isArray(req.body?.history) ? req.body.history : [];
+    if (!question) throw new AppError("Please type a question.", 400);
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+    // Stop generating if the user leaves the page.
+    let closed = false;
+    res.on("close", () => (closed = true));
+
+    try {
+      const { sources, tokens } = await answer(toRepoId(owner, repo), question, history);
+      send("sources", sources);
+      for await (const token of tokens) {
+        if (closed) break;
+        send("token", token);
+      }
+      send("done", {});
+    } catch (err) {
+      send("error", { error: userMessage(err) });
+    }
+    res.end();
+  });
+
+  // For normal use (after `npm run build`), Express also serves the built web app.
+  const webDist = path.join(ROOT_DIR, "web", "dist");
+  if (existsSync(webDist)) {
+    app.use(express.static(webDist));
+    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+  }
 
   app.use(errorHandler);
   return app;
 }
 
-// Express recognises an error handler by its four parameters.
-function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
-  if (err instanceof AppError) {
-    res.status(err.status).json({ error: err.message });
-    return;
-  }
+/** The message to show the user: the AppError's own message, or a generic one for anything else. */
+function userMessage(err: unknown): string {
+  if (err instanceof AppError) return err.message;
   // Log only the message: never the request, headers or config, which could hold the token.
   console.error("Unexpected error:", err instanceof Error ? err.message : err);
-  res.status(500).json({ error: "Something went wrong on the server. Please try again." });
+  return "Something went wrong on the server. Please try again.";
+}
+
+// Express recognises an error handler by its four parameters.
+function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+  res.status(err instanceof AppError ? err.status : 500).json({ error: userMessage(err) });
 }
