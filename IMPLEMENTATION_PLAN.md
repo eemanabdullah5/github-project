@@ -68,7 +68,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 2 — GitHub client (1 day)
+## Phase 2 — GitHub client (1 day) — ✅ Built 2026-11-07 (unit tests pass; 2.6 needs a real token in `.env`)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -81,7 +81,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 3 — Ingestion and line chunking (1 day)
+## Phase 3 — Ingestion and line chunking (1 day) — ✅ Built 2026-11-07 (unit tests pass; 3.5 needs a real token)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -93,7 +93,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 4 — Embeddings, vector store and indexer (1 day)
+## Phase 4 — Embeddings, vector store and indexer (1 day) — ✅ Built 2026-11-07 (not yet run against Ollama, which is on hold, see Phase 0.1)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -106,7 +106,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 5 — RAG answers (1 day) — ⭐ core milestone
+## Phase 5 — RAG answers (1 day) — ⭐ core milestone — ✅ Built 2026-11-07 (Phase 5 checks still need Ollama)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -124,7 +124,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 6 — HTTP API (½ day)
+## Phase 6 — HTTP API (½ day) — ✅ Built 2026-11-07 (routes live in `app.ts`, see Phase 1)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -136,7 +136,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 7 — Repo Browser UI (1 day)
+## Phase 7 — Repo Browser UI (1 day) — ✅ Built 2026-11-07 (PRD checks happen in Phase 11)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -151,7 +151,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 8 — Chat UI (1 day)
+## Phase 8 — Chat UI (1 day) — ✅ Built 2026-11-07 (PRD checks happen in Phase 11)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
@@ -164,7 +164,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 9 — Theme and polish (½ day)
+## Phase 9 — Theme and polish (½ day) — ✅ Built 2026-11-07
 
 | # | Task | Done when |
 |---|---|---|
@@ -174,7 +174,7 @@ Routes live in `app.ts` (not `index.ts`), so tests can start the app on a random
 
 ---
 
-## Phase 10 — tree-sitter chunking (1 day) — only if D8 is approved
+## Phase 10 — tree-sitter chunking (1 day) — only if D8 is approved — ✅ Built 2026-11-07 (10.5 script written but not run: it needs Ollama, so D8 stays Proposed)
 
 | # | Task | Files | Done when |
 |---|---|---|---|
