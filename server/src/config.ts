@@ -14,12 +14,29 @@ function env(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
 }
 
+/**
+ * Which AI service answers questions and makes embeddings (DECISIONS D16):
+ *  - "gemini": Google's Gemini API. Fast, but repo code is sent to Google.
+ *  - "ollama": Qwen running locally in Ollama. Code stays on this machine (D3, D4, D13).
+ */
+const llmProvider = env("LLM_PROVIDER", "gemini").toLowerCase();
+if (llmProvider !== "gemini" && llmProvider !== "ollama") {
+  throw new Error(`LLM_PROVIDER must be "gemini" or "ollama" (got "${llmProvider}"). Check your .env file.`);
+}
+
+/** Default models for each provider, used when CHAT_MODEL / EMBED_MODEL are left empty in .env. */
+const DEFAULT_MODELS = {
+  gemini: { chat: "gemini-3.6-flash", embed: "gemini-embedding-001" },
+  ollama: { chat: "", embed: "" }, // must be set in .env: they depend on the hardware
+};
+
 export const config = {
   githubToken: env("GITHUB_TOKEN"),
-  // LLM settings are pending senior confirmation (DECISIONS D3, D4, D13).
+  llmProvider: llmProvider as "gemini" | "ollama",
+  geminiApiKey: env("GEMINI_API_KEY"),
   ollamaHost: env("OLLAMA_HOST", "http://127.0.0.1:11434"),
-  chatModel: env("CHAT_MODEL"),
-  embedModel: env("EMBED_MODEL"),
+  chatModel: env("CHAT_MODEL", DEFAULT_MODELS[llmProvider].chat),
+  embedModel: env("EMBED_MODEL", DEFAULT_MODELS[llmProvider].embed),
   // Local only (DECISIONS D14): never bind to 0.0.0.0.
   host: "127.0.0.1",
   port: Number(env("PORT", "3001")),

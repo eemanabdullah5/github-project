@@ -27,6 +27,7 @@ This file records **why** each decision was made, so nobody has to guess later. 
 | D13 | Ollama to run Qwen locally | **Pending** | 2026-10-29 |
 | D14 | Local only, single user, no login | Approved | 2026-10-28 |
 | D15 | Fine-grained GitHub token (not classic) | Approved for the MVP; org access **Pending** | 2026-10-29 |
+| D16 | Switchable AI provider: Gemini API (used now) or local Ollama | **Proposed** | 2026-11-07 |
 
 ---
 
@@ -213,6 +214,24 @@ This file records **why** each decision was made, so nobody has to guess later. 
   2. Several fine-grained tokens merged into one list (a little more code)
   3. A GitHub App (the proper long-term solution, more setup, out of scope for the MVP)
   4. A classic token (works, but has write access; only with explicit approval)
+
+## D16 — Switchable AI provider: Gemini API (used now) or local Ollama
+
+- **Status:** **Proposed** · **Date:** 2026-11-07 · **Related:** D3, D4, D13 (still pending)
+- **Context:** Qwen on Ollama is very slow on a laptop with no graphics card, and D3/D4/D13 are still waiting for senior confirmation. Development needs a fast model now.
+- **Options considered:**
+  1. Keep Ollama only: code stays local, but too slow to develop and demo with on current hardware.
+  2. Replace Ollama with the Gemini API: fast, but switching back to local Qwen later means rewriting the LLM code.
+  3. Support both, picked with `LLM_PROVIDER` in `.env`: a little more code, either can be used.
+- **Decision:** option 3. `LLM_PROVIDER=gemini` is the default for now, with `gemini-3.6-flash` for chat and `gemini-embedding-001` for embeddings.
+- **Why:**
+  - Gemini is fast without a GPU.
+  - Keeping Ollama means the local-only setup can come back by changing one setting, if seniors require it.
+  - Each provider lives in its own file (`llmGemini.ts`, `llmOllama.ts`) behind `llm.ts`, so the rest of the app doesn't change.
+- **Consequences:**
+  - **Privacy:** with Gemini, code chunks from indexed repos (including **private** repos) and questions are sent to Google. While Gemini is used, this breaks PRD FR-2.11, NFR-9 and acceptance criterion 22. **Needs senior approval before use with company code.**
+  - A Gemini API key (`GEMINI_API_KEY`) is needed. Free-tier rate limits can slow indexing of large repos; the app waits and retries.
+  - Indexes built with one provider's embedding model show as **stale** under the other, so switching means re-indexing.
 
 ---
 

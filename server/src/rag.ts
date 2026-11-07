@@ -3,10 +3,9 @@
 //  2. Turn the question into a vector and fetch the 8 closest code chunks.
 //  3. Build a prompt: rules + README/file tree + chunks + recent history + the question.
 //  4. Stream the model's answer back, with the list of sources.
-import type { Message } from "ollama";
 import { CHARS_PER_TOKEN, HISTORY_TURNS, MAX_README_TOKENS, MAX_TREE_LINES, NUM_CTX, TOP_K } from "./config.js";
 import { AppError } from "./errors.js";
-import { chat, chatStream, embedQuery } from "./llm.js";
+import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
 import type { ChatMessage, Chunk, Manifest, Source } from "./types.js";
 import { loadManifest, query } from "./vectorStore.js";
 
@@ -49,7 +48,7 @@ function formatChunk(chunk: Chunk, n: number): string {
 }
 
 /** Only the last few exchanges (question + answer pairs) are sent, as plain role/content messages. */
-function recentHistory(history: ChatMessage[]): Message[] {
+function recentHistory(history: ChatMessage[]): ChatTurn[] {
   return history.slice(-HISTORY_TURNS * 2).map((m) => ({ role: m.role, content: m.content }));
 }
 
@@ -64,7 +63,7 @@ export function buildPrompt(input: {
   history: ChatMessage[];
   chunks: Chunk[]; // best match first
   manifest: Pick<Manifest, "repoId" | "fileTree" | "readme">;
-}): { messages: Message[]; usedChunks: Chunk[] } {
+}): { messages: ChatTurn[]; usedChunks: Chunk[] } {
   const repoContext =
     `Repository: ${input.manifest.repoId}\n\n` +
     `<<<REPO FILE TREE>>>\n${truncateTree(input.manifest.fileTree)}\n<<<END FILE TREE>>>\n\n` +

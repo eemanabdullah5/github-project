@@ -1,5 +1,5 @@
 // Try-out script (Phase 5.4): asks one question about an indexed repo and prints the streamed answer and sources.
-// Needs Ollama running and the repo already indexed (see indexRepo.ts).
+// Needs the AI provider set up in .env (Gemini key or Ollama) and the repo already indexed (see indexRepo.ts).
 // Run from the project root:  npx tsx server/scripts/ask.ts owner/repo "Which function handles login?"
 import { parseRepoUrl, toRepoId } from "../src/githubClient.js";
 import { answer } from "../src/rag.js";

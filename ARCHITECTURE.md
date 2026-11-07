@@ -36,7 +36,7 @@
 | HTTP client | built-in `fetch` | GitHub REST API |
 | Zip reading | `fflate` | Reads the repo archive in memory |
 | Chunking | `web-tree-sitter` (WASM) | Function-aware chunking (§7). WASM avoids native builds on Windows. |
-| LLM + embeddings | Qwen models served by **Ollama**, called through the `ollama` npm package | Chat model and embedding model, both running locally |
+| LLM + embeddings | Switchable with `LLM_PROVIDER` (D16): **Gemini API** via `@google/genai` (current default; code is sent to Google), or Qwen models served by **Ollama** via the `ollama` package (local) | Chat model and embedding model |
 | Vector DB | `@lancedb/lancedb` (embedded) | Stores vectors and chunk metadata on disk |
 | Config | `dotenv` | Loads settings from `.env` |
 | Tests | `vitest` | Unit and integration tests |
@@ -406,3 +406,4 @@ The reasoning behind each decision is in [DECISIONS.md](DECISIONS.md).
 | D13 | Ollama to run Qwen locally | **Pending** senior confirmation |
 | D14 | Local only, single user, no login | Approved |
 | D15 | Fine-grained, read-only GitHub token (not classic); org access method to be decided | Approved for MVP; org access **Pending** |
+| D16 | Switchable AI provider via `LLM_PROVIDER`: Gemini API (default for now; code is sent to Google) or local Ollama | **Proposed** |

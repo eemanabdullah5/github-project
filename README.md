@@ -6,7 +6,14 @@ A local web app that lets engineering leaders ask questions about a GitHub repos
 2. You pick a repo, and the app downloads and indexes its code on your machine.
 3. You chat with it. Each answer starts with a plain-language summary, then gives the technical detail and the files and lines it used.
 
-All AI runs locally on a Qwen model served by **Ollama**, so repository code is never sent to a third-party AI service. The only outside service the app talks to is the GitHub API.
+The AI can come from one of two providers, chosen with `LLM_PROVIDER` in `.env` ([DECISIONS.md](DECISIONS.md) D16):
+
+| Provider | Speed | Privacy |
+|---|---|---|
+| `gemini` (default for now): Google's Gemini API | Fast, no GPU needed | ⚠️ Code from indexed repos (including private ones) and your questions are **sent to Google** |
+| `ollama`: Qwen running locally in Ollama | Slow without a GPU | Code never leaves your machine |
+
+Get senior approval before using Gemini with company code.
 
 More detail: [PRD.md](PRD.md) (what it does), [ARCHITECTURE.md](ARCHITECTURE.md) (how it works), [DECISIONS.md](DECISIONS.md) (why).
 
@@ -14,14 +21,19 @@ More detail: [PRD.md](PRD.md) (what it does), [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Setup
 
-### 1. Install the tools
+### 1. Install Node.js
 
-- **Node.js 22 or newer**: check with `node --version`.
-- **Ollama**: download it from [ollama.com](https://ollama.com) and start it. It listens on `127.0.0.1:11434`.
+You need **Node.js 22 or newer**. Check with `node --version`.
 
-### 2. Download the models
+### 2. Set up the AI provider
 
-Pull one chat model and one embedding model. On a laptop with no graphics card, use small ones:
+**Option A: Gemini (default)**
+
+Create an API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). That's all you need.
+
+**Option B: Ollama (local)**
+
+Download Ollama from [ollama.com](https://ollama.com) and start it. It listens on `127.0.0.1:11434`. Then pull one chat model and one embedding model. On a laptop with no graphics card, use small ones:
 
 ```bash
 ollama pull qwen2.5-coder:3b
@@ -41,16 +53,28 @@ Don't use a classic token. Reading private repos with one needs the `repo` scope
 
 ### 4. Create `.env`
 
-Copy `.env.example` to `.env` in the project root and fill it in:
+Copy `.env.example` to `.env` in the project root and fill it in.
+
+For Gemini:
 
 ```bash
 GITHUB_TOKEN=github_pat_...
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your-gemini-key
+# CHAT_MODEL and EMBED_MODEL can stay empty: they default to gemini-3.6-flash and gemini-embedding-001
+```
+
+For Ollama:
+
+```bash
+GITHUB_TOKEN=github_pat_...
+LLM_PROVIDER=ollama
 OLLAMA_HOST=http://127.0.0.1:11434
 CHAT_MODEL=qwen2.5-coder:3b
 EMBED_MODEL=qwen3-embedding:0.6b
 ```
 
-`.env` is git-ignored. Never commit it.
+`.env` is git-ignored. Never commit it. If you switch provider, re-index your repos, because the two providers' embeddings can't be mixed.
 
 ### 5. Install and run
 
@@ -84,13 +108,13 @@ Limits: up to 1,000 repos in the list, and up to 1,000 files or 20 MB of code pe
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start the server and the web app in development mode |
-| `npm test` | Run the server's unit tests (no network or Ollama needed) |
+| `npm test` | Run the server's unit tests (no network or AI provider needed) |
 | `npm run typecheck` | Type-check the server and the web app |
 | `npm run build` | Build both for normal use |
 
 ### Try-out scripts
 
-Run these from the project root. They need `.env`, and the last two also need Ollama running.
+Run these from the project root. They need `.env`. The last three also use the AI provider.
 
 ```bash
 npx tsx server/scripts/tryGithub.ts                       # list your repos and download one zip
@@ -126,7 +150,9 @@ server/src/
   githubClient.ts   the only file that talks to GitHub
   ingestion.ts      zip → list of useful text files
   chunking/         splits files into chunks (by function/class, or by lines)
-  llm.ts            the only file that talks to Ollama
+  llm.ts            AI entry point: picks Gemini or Ollama
+  llmGemini.ts      the only file that talks to Gemini
+  llmOllama.ts      the only file that talks to Ollama
   vectorStore.ts    saves and searches chunks (LanceDB)
   indexer.ts        the background indexing job
   rag.ts            builds the prompt and streams the answer
@@ -141,4 +167,5 @@ data/               local indexes (git-ignored)
 ## Privacy
 
 - The `data/` folder holds copies of the code you indexed, including private repos. Treat it as sensitive, and keep the project out of cloud-synced folders such as OneDrive.
-- The token is read only from `.env`. It is never logged, shown in the UI or sent to the browser.
+- The GitHub token and Gemini key are read only from `.env`. They are never logged, shown in the UI or sent to the browser.
+- With `LLM_PROVIDER=gemini`, indexed code and questions are sent to Google. Use `ollama` to keep everything local.

@@ -2,7 +2,7 @@
 // For each test repo, it chunks the code two ways, "syntax + line" and "line only", embeds
 // both, and checks how often the expected file shows up in the top 8 results (hit@8).
 // Everything stays in memory: the real index in data/ is not touched.
-// Needs Ollama running with EMBED_MODEL pulled.
+// Needs the AI provider set up in .env (Gemini key, or Ollama with EMBED_MODEL pulled).
 //
 // Run from the project root:  npx tsx server/scripts/evalRetrieval.ts questions.json
 //

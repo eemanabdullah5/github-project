@@ -1,5 +1,5 @@
 // Try-out script (Phase 4.6): indexes a repo and prints progress, then prints its status.
-// Needs Ollama running with CHAT_MODEL and EMBED_MODEL pulled.
+// Needs the AI provider set up in .env (Gemini key, or Ollama with both models pulled).
 // Run from the project root:  npx tsx server/scripts/indexRepo.ts owner/repo
 import { parseRepoUrl } from "../src/githubClient.js";
 import { checkIndexStatus, getJob, startIndexJob } from "../src/indexer.js";
