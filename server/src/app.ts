@@ -9,7 +9,8 @@ import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { analyzeHistory, loadHistory } from "./gitHistory.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
-import { answer, suggestFollowUps, type AnswerDepth } from "./rag.js";
+import type { AnswerDepth } from "./prompts.js";
+import { answer, suggestFollowUps } from "./rag.js";
 import { generateReport, loadReport } from "./report.js";
 import type { ChatMessage, Repo } from "./types.js";
 

@@ -1,7 +1,8 @@
 // Tests for buildPrompt: order, delimiters, history window and the prompt budget.
 import { describe, expect, it } from "vitest";
 import { MAX_TREE_LINES } from "../src/config.js";
-import { DEPTH_RULES, SYSTEM_RULES, buildPrompt, parseFollowUps } from "../src/rag.js";
+import { DEPTH_RULES, SYSTEM_RULES } from "../src/prompts.js";
+import { buildPrompt, parseFollowUps } from "../src/rag.js";
 import type { ChatMessage, Chunk } from "../src/types.js";
 
 const chunk = (id: string, text = `code ${id}`): Chunk => ({

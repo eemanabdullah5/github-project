@@ -156,6 +156,7 @@ server/src/
   vectorStore.ts    saves and searches chunks (LanceDB)
   indexer.ts        the background indexing job
   rag.ts            builds the prompt and streams the answer
+  prompts.ts        the text of every instruction sent to the AI
 web/src/
   App.tsx           view switching and theme
   api.ts            calls to the server
