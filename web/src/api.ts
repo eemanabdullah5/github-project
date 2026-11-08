@@ -39,6 +39,9 @@ export interface Source {
   symbol: string;
 }
 
+// F2: answer style. "executive" = short and simple, "technical" = full detail with code.
+export type AnswerDepth = "executive" | "technical";
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -113,6 +116,7 @@ export async function streamChat(
   name: string,
   question: string,
   history: ChatMessage[],
+  depth: AnswerDepth, // F2: the answer style chosen with the toggle
   handlers: { onSources: (sources: Source[]) => void; onToken: (text: string) => void },
 ): Promise<void> {
   let res: Response;
@@ -120,7 +124,8 @@ export async function streamChat(
     res = await fetch(`${repoPath(owner, name)}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history: history.map(({ role, content }) => ({ role, content })) }),
+      // F2: depth is sent with every question, so the server knows which answer style to use.
+      body: JSON.stringify({ question, depth, history: history.map(({ role, content }) => ({ role, content })) }),
     });
   } catch {
     throw new Error("Can't reach the server. Is it running? (npm run dev)");

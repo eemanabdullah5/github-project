@@ -2,11 +2,12 @@
 // Header with the repo name, index status, short commit SHA and the Back / Re-index / Clear buttons.
 // Answers stream in word by word, are rendered as Markdown with highlighted code, and list their sources.
 // F1: file names in answers and in the Sources list are links that open the code on GitHub.
+// F2: Executive / Technical buttons choose how detailed the answers are.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
-import { getStatus, startIndex, streamChat, type ChatMessage, type Repo, type StatusResponse } from "../api";
+import { getStatus, startIndex, streamChat, type AnswerDepth, type ChatMessage, type Repo, type StatusResponse } from "../api";
 import IndexProgress from "../components/IndexProgress";
 import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
 
@@ -22,6 +23,12 @@ const STARTER_QUESTIONS = [
   "What external services does it depend on?",
   "What are the main risks or tech debt?",
 ];
+
+// F2: reads the answer style the user picked last time (saved in the browser).
+// If they never picked one, use "technical", the full detailed answer.
+function initialDepth(): AnswerDepth {
+  return localStorage.getItem("answerDepth") === "executive" ? "executive" : "technical";
+}
 
 /** How many past question/answer pairs are sent with each new question. */
 const HISTORY_TURNS = 3;
@@ -39,6 +46,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reindexing, setReindexing] = useState(false);
+  const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
   const bottomRef = useRef<HTMLDivElement>(null);
 
   /** Loads the index status and commit SHA for the header. */
@@ -49,6 +57,9 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   }
 
   useEffect(loadStatus, [repo.owner, repo.name]);
+
+  // F2: whenever the answer style changes, save it so it's remembered next time.
+  useEffect(() => localStorage.setItem("answerDepth", depth), [depth]);
 
   // Keep the newest message in view as the answer streams in.
   useEffect(() => {
@@ -70,7 +81,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
     setBusy(true);
     setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "", sources: [] }]);
     try {
-      await streamChat(repo.owner, repo.name, text, history, {
+      await streamChat(repo.owner, repo.name, text, history, depth, {
         onSources: (sources) => updateLastMessage((m) => ({ ...m, sources })),
         onToken: (token) => updateLastMessage((m) => ({ ...m, content: m.content + token })),
       });
@@ -179,6 +190,24 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
       </div>
 
       {error && <p className="error">{error}</p>}
+
+      {/* F2: the two answer-style buttons. The selected one is filled in; the choice applies to the next question. */}
+      <div className="depth-toggle" role="radiogroup" aria-label="Answer style">
+        <span className="muted small">Answer style:</span>
+        {(["executive", "technical"] as const).map((d) => (
+          <button
+            key={d}
+            role="radio"
+            aria-checked={depth === d}
+            className={depth === d ? "" : "secondary"}
+            onClick={() => setDepth(d)}
+            disabled={busy}
+            title={d === "executive" ? "Short, plain-language answers for leaders. No code." : "Full detail with code, for developers."}
+          >
+            {d === "executive" ? "Executive" : "Technical"}
+          </button>
+        ))}
+      </div>
 
       <form
         className="row"

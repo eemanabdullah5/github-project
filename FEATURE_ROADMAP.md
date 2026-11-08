@@ -40,7 +40,7 @@ Built in this order, because later features reuse earlier ones.
 | # | Feature | Source | Effort | Status |
 |---|---|---|---|---|
 | F1 | **Clickable sources**: each cited file opens on GitHub at the exact lines of the indexed commit | Claude Code | S | ✅ Done |
-| F2 | **Executive / Technical toggle**: short leader answers or detailed developer answers | PRD | S | Planned |
+| F2 | **Executive / Technical toggle**: short leader answers or detailed developer answers | PRD | S | ✅ Done |
 | F3 | **Suggested follow-up questions** after each answer | Claude Code | S | Planned |
 | F4 | **Git history hotspots**: which files change most, how complex they are, which files change together, and which areas only one person works on | Opus + Claude Code | M | Planned |
 | F5 | **Repo health report**: one click gives a summary, tech stack, structure, dependencies, hotspots and risks, downloadable as Markdown | Claude Code + Opus | M | Planned |
@@ -135,3 +135,31 @@ Each feature gets a section here when it's built: what it does, how it works, wh
 **No server changes:** the browser already had the commit SHA and the sources.
 
 **How to demo:** open a repo's chat → ask a question → click a blue citation in the answer, or open *Sources* and click a file.
+
+### F2 — Executive / Technical toggle ✅
+
+**What it does:** two buttons above the question box, *Executive* or *Technical*:
+- **Executive:** a short summary plus 3–5 bullet points on purpose, impact, risk and effort. Under about 150 words, no code, no jargon. Still cites files, so F1 links work.
+- **Technical** (default): the summary plus full detail and code snippets. This is the original behaviour.
+
+The choice applies to the next question, and the browser remembers it.
+
+**How it works:**
+1. The browser sends the choice with each question: `POST /api/repos/:owner/:repo/chat` with body `{ question, history, depth }`.
+2. The chat route checks the value. Anything other than `"executive"` becomes `"technical"`, so a wrong value can't break anything.
+3. `buildPrompt()` in `rag.ts` adds one of two fixed instruction blocks (`DEPTH_RULES`) right after the main rules. Only the instructions to the AI change. Search, sources and citations work the same in both modes.
+4. The executive instructions say clearly that they override the "include code snippets" rule, so the AI doesn't get mixed messages.
+
+**Measured on a real repo (Gemini, same question):** executive gave 115 words and 0 code blocks; technical gave 290 words and 3 code blocks.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/rag.ts](server/src/rag.ts) | New `AnswerDepth` type and `DEPTH_RULES`. `buildPrompt()` and `answer()` take a `depth`. |
+| [server/src/app.ts](server/src/app.ts) | The chat route reads `depth` from the request and passes it to `answer()` |
+| [web/src/api.ts](web/src/api.ts) | `streamChat()` sends `depth` |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | The toggle buttons. The choice is saved in `localStorage` under `answerDepth`. |
+| [web/src/index.css](web/src/index.css) | Toggle styles |
+| [server/tests/rag.test.ts](server/tests/rag.test.ts), [server/tests/app.test.ts](server/tests/app.test.ts) | 3 tests: technical is the default, executive adds its rules, and the API passes the value through (unknown values become technical) |
+
+**How to demo:** ask *"How does it handle memory?"* with **Executive** selected, then switch to **Technical** and ask again.

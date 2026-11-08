@@ -21,7 +21,7 @@ vi.mock("../src/indexer.js", () => ({
     }),
 }));
 vi.mock("../src/rag.js", () => ({
-  answer: vi.fn(async () => ({
+  answer: vi.fn(async (..._args: unknown[]) => ({
     sources: [{ path: "a.ts", startLine: 1, endLine: 2, symbol: "" }],
     tokens: (async function* () {
       yield "Hello";
@@ -32,6 +32,7 @@ vi.mock("../src/rag.js", () => ({
 
 const { createApp } = await import("../src/app.js");
 const { listAccessibleRepos } = await import("../src/githubClient.js");
+const { answer } = await import("../src/rag.js");
 
 let server: Server;
 let baseUrl: string;
@@ -100,6 +101,20 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
     const events = (await res.text()).trim().split("\n\n").map((e) => e.split("\n")[0]);
     expect(events).toEqual(["event: sources", "event: token", "event: token", "event: done"]);
+  });
+
+  // F2: the answer style from the browser reaches rag.answer() (4th argument).
+  it("passes the answer style to rag, and treats unknown values as technical", async () => {
+    const ask = (depth: unknown) =>
+      fetch(`${baseUrl}/api/repos/octo/hello/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "hi", depth }),
+      }).then((r) => r.text());
+    await ask("executive");
+    expect(vi.mocked(answer).mock.lastCall?.[3]).toBe("executive");
+    await ask("something-else");
+    expect(vi.mocked(answer).mock.lastCall?.[3]).toBe("technical");
   });
 
   it("rejects an empty question", async () => {

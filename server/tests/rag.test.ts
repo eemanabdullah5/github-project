@@ -1,7 +1,7 @@
 // Tests for buildPrompt: order, delimiters, history window and the prompt budget.
 import { describe, expect, it } from "vitest";
 import { MAX_TREE_LINES } from "../src/config.js";
-import { SYSTEM_RULES, buildPrompt } from "../src/rag.js";
+import { DEPTH_RULES, SYSTEM_RULES, buildPrompt } from "../src/rag.js";
 import type { ChatMessage, Chunk } from "../src/types.js";
 
 const chunk = (id: string, text = `code ${id}`): Chunk => ({
@@ -55,5 +55,18 @@ describe("buildPrompt", () => {
     const { messages } = buildPrompt({ question: "q", history: [], chunks: [], manifest: { ...manifest, fileTree } });
     expect(messages[0].content).toContain("… (50 more files)");
     expect(messages[0].content).not.toContain(`f${MAX_TREE_LINES}.ts\n`);
+  });
+
+  // F2: answer style
+  it("uses the technical answer style by default", () => {
+    const { messages } = buildPrompt({ question: "q", history: [], chunks: [], manifest });
+    expect(messages[0].content).toContain(DEPTH_RULES.technical);
+    expect(messages[0].content).not.toContain(DEPTH_RULES.executive);
+  });
+
+  it("uses the executive answer style when asked", () => {
+    const { messages } = buildPrompt({ question: "q", history: [], chunks: [], manifest, depth: "executive" });
+    expect(messages[0].content).toContain(DEPTH_RULES.executive);
+    expect(messages[0].content).toContain("Do not include code snippets");
   });
 });

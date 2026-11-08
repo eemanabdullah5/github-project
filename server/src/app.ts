@@ -8,7 +8,7 @@ import { ROOT_DIR } from "./config.js";
 import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
-import { answer } from "./rag.js";
+import { answer, type AnswerDepth } from "./rag.js";
 import type { ChatMessage, Repo } from "./types.js";
 
 /** The repo list, kept in memory so we don't ask GitHub again on every page load. */
@@ -69,11 +69,13 @@ export function createApp() {
     res.json(getJob());
   });
 
-  // Chat: streams the answer as Server-Sent Events: "sources", then many "token", then "done" (or "error").
+  // Chat: body is { question, history, depth }. Streams the answer as Server-Sent Events: "sources", then many "token", then "done" (or "error").
   app.post("/api/repos/:owner/:repo/chat", async (req, res) => {
     const { owner, repo } = repoParams(req);
     const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
     const history: ChatMessage[] = Array.isArray(req.body?.history) ? req.body.history : [];
+    // F2: the answer style from the toggle. Anything other than "executive" (even a typo) means "technical".
+    const depth: AnswerDepth = req.body?.depth === "executive" ? "executive" : "technical";
     if (!question) throw new AppError("Please type a question.", 400);
 
     res.writeHead(200, {
@@ -88,7 +90,7 @@ export function createApp() {
     res.on("close", () => (closed = true));
 
     try {
-      const { sources, tokens } = await answer(toRepoId(owner, repo), question, history);
+      const { sources, tokens } = await answer(toRepoId(owner, repo), question, history, depth);
       send("sources", sources);
       for await (const token of tokens) {
         if (closed) break;

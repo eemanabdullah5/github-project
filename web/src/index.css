@@ -315,3 +315,16 @@ select {
 a {
   color: var(--accent);
 }
+
+/* F2: Executive / Technical buttons above the question box */
+.depth-toggle {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.depth-toggle button {
+  padding: 0.2rem 0.75rem;
+  font-size: 0.9rem;
+}
