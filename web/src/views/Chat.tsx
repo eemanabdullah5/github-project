@@ -1,12 +1,19 @@
 // View 2: Chat (PRD FR-3, FR-4, ARCHITECTURE §11).
 // Header with the repo name, index status, short commit SHA and the Back / Re-index / Clear buttons.
 // Answers stream in word by word, are rendered as Markdown with highlighted code, and list their sources.
+// F1: file names in answers and in the Sources list are links that open the code on GitHub.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import { getStatus, startIndex, streamChat, type ChatMessage, type Repo, type StatusResponse } from "../api";
 import IndexProgress from "../components/IndexProgress";
+import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
+
+// F1: makes every link inside an answer open in a new tab, so the chat stays open.
+const markdownComponents = {
+  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+};
 
 /** The 4 example questions shown before the first message (PRD FR-4.5). */
 const STARTER_QUESTIONS = [
@@ -88,6 +95,10 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   }
 
   const shortSha = status?.manifest?.commitSha.slice(0, 7);
+  // F1: which repo and version the GitHub links open.
+  // We use the commit we indexed, so the line numbers match the code the AI read.
+  // (If the status hasn't loaded yet, we fall back to the repo's default branch, e.g. main.)
+  const linkTarget: LinkTarget = { owner: repo.owner, name: repo.name, ref: status?.manifest?.commitSha ?? repo.defaultBranch };
   const statusLabel = status ? { fresh: "Up to date", stale: "New commits since indexing", missing: "Not indexed" }[status.status] : "Checking…";
 
   return (
@@ -137,7 +148,10 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
               <>
                 {m.content ? (
                   // No rehype-raw: raw HTML in model output is never rendered (ARCHITECTURE §13).
-                  <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{m.content}</ReactMarkdown>
+                  // F1: linkCitations turns [file:L10-L16] in the answer into GitHub links before showing it.
+                  <ReactMarkdown rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
+                    {linkCitations(m.content, linkTarget, m.sources ?? [])}
+                  </ReactMarkdown>
                 ) : (
                   <p className="muted">Thinking…</p>
                 )}
@@ -147,7 +161,10 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
                     <ul>
                       {m.sources.map((s, j) => (
                         <li key={j}>
-                          <code>{s.path}:L{s.startLine}-L{s.endLine}</code>
+                          {/* F1: each source is a link to those lines on GitHub, opened in a new tab. */}
+                          <a href={sourceUrl(linkTarget, s)} target="_blank" rel="noopener noreferrer">
+                            <code>{s.path}:L{s.startLine}-L{s.endLine}</code>
+                          </a>
                           {s.symbol && <span className="muted"> {s.symbol}</span>}
                         </li>
                       ))}

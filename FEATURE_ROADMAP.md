@@ -39,7 +39,7 @@ Built in this order, because later features reuse earlier ones.
 
 | # | Feature | Source | Effort | Status |
 |---|---|---|---|---|
-| F1 | **Clickable sources**: each cited file opens on GitHub at the exact lines of the indexed commit | Claude Code | S | Planned |
+| F1 | **Clickable sources**: each cited file opens on GitHub at the exact lines of the indexed commit | Claude Code | S | ✅ Done |
 | F2 | **Executive / Technical toggle**: short leader answers or detailed developer answers | PRD | S | Planned |
 | F3 | **Suggested follow-up questions** after each answer | Claude Code | S | Planned |
 | F4 | **Git history hotspots**: which files change most, how complex they are, which files change together, and which areas only one person works on | Opus + Claude Code | M | Planned |
@@ -109,3 +109,29 @@ How each one works is written up under [Implementation notes](#implementation-no
 ## Implementation notes
 
 Each feature gets a section here when it's built: what it does, how it works, which files changed, and how to demo it.
+
+### F1 — Clickable sources ✅
+
+**What it does:** file names in an answer (citations like `[src/app.py:L10-L16]`) and every file in the *Sources* list under an answer are links. Clicking one opens the file on GitHub in a new tab, with those lines highlighted.
+
+**How it works:**
+1. The chat already loads the index status, which includes the **commit SHA** the repo was indexed at.
+2. `githubLineUrl()` builds a link like `https://github.com/owner/repo/blob/<sha>/src/app.py#L10-L16`. Using the commit SHA instead of the branch name keeps the line numbers correct even after new commits.
+3. `linkCitations()` finds citations in the answer text and rewrites them as Markdown links. It handles several citations in one bracket (`[a.py:L1-L4, b.py:L7]`) and citations without the `L` (`[a.py:23-45]`), which Gemini sometimes writes.
+4. **Safety check:** a citation only becomes a link if its file is in that answer's Sources list, the code the AI was really given. A file the AI made up stays plain text, so there are no broken links.
+5. Links open in a new tab, so the chat stays open.
+
+**Why GitHub links and not an in-app viewer:** simpler, shows the whole file, and done in time for the demo. An in-app code viewer could come later. GitHub links to private repos only open for people logged in to GitHub.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [web/src/sourceLinks.ts](web/src/sourceLinks.ts) | **New.** `githubLineUrl()`, `sourceUrl()`, `linkCitations()` |
+| [web/src/sourceLinks.test.ts](web/src/sourceLinks.test.ts) | **New.** 8 tests: line ranges, single lines, spaces in paths, several citations, citations without `L`, made-up files, normal brackets left alone |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | Answers pass through `linkCitations()`. Each Sources item is a link. |
+| [web/src/index.css](web/src/index.css) | Link colour |
+| [web/package.json](web/package.json), [package.json](package.json) | Added `vitest` to the web app. `npm test` runs server and web tests. |
+
+**No server changes:** the browser already had the commit SHA and the sources.
+
+**How to demo:** open a repo's chat → ask a question → click a blue citation in the answer, or open *Sources* and click a file.

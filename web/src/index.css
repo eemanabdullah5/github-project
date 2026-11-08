@@ -310,3 +310,8 @@ select {
 .hljs-section {
   color: var(--hl-title);
 }
+
+/* F1: clickable sources open GitHub */
+a {
+  color: var(--accent);
+}
