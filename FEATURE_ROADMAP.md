@@ -43,7 +43,7 @@ Built in this order, because later features reuse earlier ones.
 | F2 | **Executive / Technical toggle**: short leader answers or detailed developer answers | PRD | S | ✅ Done |
 | F3 | **Suggested follow-up questions** after each answer | Claude Code | S | ✅ Done |
 | F4 | **Git history hotspots**: which files change most, how complex they are, which files change together, and which areas only one person works on | Opus + Claude Code | M | ✅ Done |
-| F5 | **Repo health report**: one click gives a summary, tech stack, structure, dependencies, hotspots and risks, downloadable as Markdown | Claude Code + Opus | M | Planned |
+| F5 | **Repo health report**: one click gives a summary, tech stack, structure, dependencies, hotspots and risks, downloadable as Markdown | Claude Code + Opus | M | ✅ Done |
 
 How each one works is written up under [Implementation notes](#implementation-notes) once it's built.
 
@@ -233,3 +233,36 @@ The choice applies to the next question, and the browser remembers it.
 | [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | API calls and types. Tab, chart and table styles. The bar colour passed contrast and colour-blindness checks on both themes. |
 
 **How to demo:** open a repo with some history (class-flow) → **Hotspots** → **Analyse history** → walk through the chart, the pairs and knowledge risk.
+
+### F5 — Repo health report ✅
+
+**What it does:** a **Report** tab next to Chat and Hotspots. One click generates a one-page health report a CTO could read or forward, and **Download .md** saves it as a Markdown file. The report has:
+1. **Facts:** repo, commit, file count, languages. Calculated directly, no AI.
+2. **Overview, Tech stack, Structure, Dependencies and external services, Risks and tech debt, Onboarding notes:** written by the AI from the indexed code, in executive style, with citations. "Risks" starts with *"Based on the parts of the code that were retrieved, not a full audit."*
+3. **Hotspots and knowledge risk:** copied word for word from the F4 analysis (top 5 hotspots, most linked files, one-person areas). No AI, so the numbers are exact.
+
+**How it works:**
+1. `POST /api/repos/:owner/:repo/report` runs `generateReport()`.
+2. For each of the 6 AI sections, it searches the index with its own question (e.g. *"Which external services, APIs, databases… does it depend on?"*) and takes the best 4 chunks.
+3. `mergeRoundRobin()` merges the 6 result lists **taking turns**: every section's best chunk first, then every section's second best, skipping repeats. If the prompt is too big and the end of the list gets cut, every section still keeps its best code.
+4. `buildReportPrompt()` asks for the fixed headings, adds the README, file tree and chunks, and stays within the size limit. **One** AI call writes all 6 sections.
+5. The facts section, the AI sections and the F4 section are joined into one Markdown document. `plural()` makes the numbers read properly ("1 commit", "24 commits").
+6. The report is saved in `data/reports/<owner>__<repo>.json`, so reopening is instant. `GET /api/repos/:owner/:repo/report` returns it. **Regenerate** makes a new one.
+7. In the browser, citations become GitHub links (F1). The downloaded file keeps the links.
+
+**Cost:** one chat call plus 6 tiny search embeddings. The repo isn't re-embedded, so it fits easily in the free Gemini limits.
+
+**Tested on ai_agent_oop (Gemini):** 13 seconds, all sections, 15 cited sources. It found real tech debt: duplicated code under `Final_submission/`.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/report.ts](server/src/report.ts) | **New.** `generateReport()`, `loadReport()`, `languageBreakdown()`, `factsSection()`, `hotspotsSection()`, `mergeRoundRobin()`, `buildReportPrompt()` |
+| [server/src/rag.ts](server/src/rag.ts) | 4 helpers are now shared with the report: `truncateTree()`, `truncateReadme()`, `formatChunk()`, `toSources()` |
+| [server/src/app.ts](server/src/app.ts) | `GET` and `POST /api/repos/:owner/:repo/report` |
+| [server/tests/report.test.ts](server/tests/report.test.ts) | **New.** 10 tests: language breakdown, facts, hotspots section with and without F4 data, plurals, fair merging, prompt headings, size limit |
+| [web/src/components/HealthReport.tsx](web/src/components/HealthReport.tsx) | **New.** The Report tab: Generate/Regenerate, rendered report, Download .md |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | Third tab: **Chat \| Hotspots \| Report** |
+| [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | API calls and type, report styling |
+
+**How to demo:** open a repo → **Hotspots** → **Analyse history** → **Report** → **Generate** → click a citation → **Download .md**.

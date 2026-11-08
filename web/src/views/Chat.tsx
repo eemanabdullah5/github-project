@@ -5,11 +5,13 @@
 // F2: Executive / Technical buttons choose how detailed the answers are.
 // F3: after each answer, 3 suggested follow-up questions appear as buttons.
 // F4: a "Hotspots" tab next to the chat shows what the git history says about the repo.
+// F5: a "Report" tab shows a one-page health report that can be downloaded.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import { getStatus, startIndex, streamChat, type AnswerDepth, type ChatMessage, type Repo, type StatusResponse } from "../api";
+import HealthReport from "../components/HealthReport";
 import Hotspots from "../components/Hotspots";
 import IndexProgress from "../components/IndexProgress";
 import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
@@ -50,7 +52,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const [error, setError] = useState("");
   const [reindexing, setReindexing] = useState(false);
   const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
-  const [tab, setTab] = useState<"chat" | "hotspots">("chat"); // F4: which tab is showing
+  const [tab, setTab] = useState<"chat" | "hotspots" | "report">("chat"); // F4/F5: which tab is showing
   const bottomRef = useRef<HTMLDivElement>(null);
 
   /** Loads the index status and commit SHA for the header. */
@@ -160,9 +162,14 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
         >
           Hotspots
         </button>
+        {/* F5 */}
+        <button role="tab" aria-selected={tab === "report"} className={tab === "report" ? "tab active" : "tab"} onClick={() => setTab("report")}>
+          Report
+        </button>
       </div>
 
       {tab === "hotspots" && <Hotspots repo={repo} />}
+      {tab === "report" && <HealthReport repo={repo} />}
 
       {/* Everything below is the Chat tab. */}
       {tab === "chat" && (

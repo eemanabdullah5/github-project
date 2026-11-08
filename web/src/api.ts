@@ -66,6 +66,15 @@ export interface HistoryReport {
   areas: Array<{ area: string; commits: number; authors: number; files: number; singleContributor: boolean }>;
 }
 
+// F5: a saved health report (same shape as HealthReport in server/src/report.ts).
+export interface HealthReport {
+  repoId: string;
+  commitSha: string; // the indexed commit the report describes (used for GitHub links)
+  generatedAt: string;
+  markdown: string; // the full report text
+  sources: Source[]; // the code the AI was given, so citations can become links
+}
+
 // F2: answer style. "executive" = short and simple, "technical" = full detail with code.
 export type AnswerDepth = "executive" | "technical";
 
@@ -140,6 +149,22 @@ export async function getHotspots(owner: string, name: string): Promise<HistoryR
 // F4: analyses the repo's git history now and returns the new report. Can take up to a minute or two.
 export function analyzeHotspots(owner: string, name: string): Promise<HistoryReport> {
   return request(`${repoPath(owner, name)}/hotspots`, { method: "POST" });
+}
+
+// F5: the saved health report, or null if none has been generated yet.
+export async function getReport(owner: string, name: string): Promise<HealthReport | null> {
+  try {
+    return await request<HealthReport>(`${repoPath(owner, name)}/report`);
+  } catch (err) {
+    // "No report yet" is a normal state, not an error, so it becomes null.
+    if ((err as Error).message.includes("No health report")) return null;
+    throw err;
+  }
+}
+
+// F5: generates a new health report now. Takes about 20-40 seconds.
+export function generateReport(owner: string, name: string): Promise<HealthReport> {
+  return request(`${repoPath(owner, name)}/report`, { method: "POST" });
 }
 
 /** The current indexing job, or null if none has run since the server started. */

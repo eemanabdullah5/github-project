@@ -10,6 +10,7 @@ import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubCl
 import { analyzeHistory, loadHistory } from "./gitHistory.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import { answer, suggestFollowUps, type AnswerDepth } from "./rag.js";
+import { generateReport, loadReport } from "./report.js";
 import type { ChatMessage, Repo } from "./types.js";
 
 /** The repo list, kept in memory so we don't ask GitHub again on every page load. */
@@ -77,6 +78,20 @@ export function createApp() {
   app.post("/api/repos/:owner/:repo/hotspots", async (req, res) => {
     const { owner, repo } = repoParams(req);
     res.json(await analyzeHistory(owner, repo));
+  });
+
+  // F5: the saved health report for a repo. 404 if none has been generated yet.
+  app.get("/api/repos/:owner/:repo/report", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const report = await loadReport(toRepoId(owner, repo));
+    if (!report) throw new AppError("No health report has been generated for this repo yet.", 404);
+    res.json(report);
+  });
+
+  // F5: generate a new health report now ("Generate" / "Regenerate" button). Takes about 20-40 seconds.
+  app.post("/api/repos/:owner/:repo/report", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await generateReport(toRepoId(owner, repo)));
   });
 
   // The current indexing job, for the progress panel (polled every second).

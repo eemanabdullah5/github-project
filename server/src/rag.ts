@@ -45,21 +45,21 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-/** Keeps the first maxLines lines of the file tree and notes how many were left out. */
-function truncateTree(tree: string): string {
+/** Keeps the first maxLines lines of the file tree and notes how many were left out. (Also used by F5.) */
+export function truncateTree(tree: string): string {
   const lines = tree.split("\n");
   if (lines.length <= MAX_TREE_LINES) return tree;
   return `${lines.slice(0, MAX_TREE_LINES).join("\n")}\n… (${lines.length - MAX_TREE_LINES} more files)`;
 }
 
-/** Keeps the start of the README, up to MAX_README_TOKENS. */
-function truncateReadme(readme: string): string {
+/** Keeps the start of the README, up to MAX_README_TOKENS. (Also used by F5.) */
+export function truncateReadme(readme: string): string {
   const maxChars = MAX_README_TOKENS * CHARS_PER_TOKEN;
   return readme.length <= maxChars ? readme : `${readme.slice(0, maxChars)}\n… (README truncated)`;
 }
 
-/** Wraps one retrieved chunk in clear start/end markers labelled with its location. */
-function formatChunk(chunk: Chunk, n: number): string {
+/** Wraps one retrieved chunk in clear start/end markers labelled with its location. (Also used by F5.) */
+export function formatChunk(chunk: Chunk, n: number): string {
   const symbol = chunk.symbol ? ` | ${chunk.symbol}` : "";
   return `<<<REPO CHUNK ${n}: ${chunk.path}${symbol} | Lines ${chunk.startLine}-${chunk.endLine}>>>\n${chunk.text}\n<<<END CHUNK ${n}>>>`;
 }
@@ -177,8 +177,8 @@ export async function suggestFollowUps(question: string, answerText: string, dep
   }
 }
 
-/** Turns chunks into the Sources list shown under an answer. */
-function toSources(chunks: Chunk[]): Source[] {
+/** Turns chunks into the Sources list shown under an answer. (Also used by F5.) */
+export function toSources(chunks: Chunk[]): Source[] {
   return chunks.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, symbol: c.symbol }));
 }
 
