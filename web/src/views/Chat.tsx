@@ -7,6 +7,7 @@
 // F4: a "Hotspots" tab next to the chat shows what the git history says about the repo.
 // F5: a "Report" tab shows a one-page health report that can be downloaded.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
+import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -34,6 +35,12 @@ const STARTER_QUESTIONS = [
 function initialDepth(): AnswerDepth {
   return localStorage.getItem("answerDepth") === "executive" ? "executive" : "technical";
 }
+
+/** The tooltip and hint text for each answer style. */
+const DEPTH_HINTS: Record<AnswerDepth, string> = {
+  executive: "Short, plain-language answers for leaders. No code.",
+  technical: "Full detail with code, for developers.",
+};
 
 /** How many past question/answer pairs are sent with each new question. */
 const HISTORY_TURNS = 3;
@@ -120,160 +127,225 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const linkTarget: LinkTarget = { owner: repo.owner, name: repo.name, ref: status?.manifest?.commitSha ?? repo.defaultBranch };
   const statusLabel = status ? { fresh: "Up to date", stale: "New commits since indexing", missing: "Not indexed" }[status.status] : "Checking…";
 
+  const StatusIcon = status?.status === "fresh" ? Check : status?.status === "stale" ? TriangleAlert : CircleDashed;
+
   return (
-    <section className="chat">
-      <div className="chat-header">
-        <button className="secondary" onClick={onBack}>← Back to repos</button>
-        <div className="grow">
-          <strong>{repo.owner}/{repo.name}</strong>
-          <div className="muted small">
-            {statusLabel}
-            {shortSha && ` · ${shortSha}`}
-            {status?.manifest && ` · ${status.manifest.fileCount} files`}
+    <>
+      <div className="chat-bar">
+        <div className="chat-bar-inner">
+          <div className="chat-bar-top">
+            <div className="chat-bar-left">
+              <button className="ghost" onClick={onBack}>
+                <ArrowLeft size={16} aria-hidden="true" />
+                Back to repos
+              </button>
+              <span className="vsep" aria-hidden="true" />
+              <div className="repo-heading">
+                <h2>
+                  {repo.owner}/{repo.name}
+                </h2>
+                <p>
+                  <span className={`status ${status?.status ?? ""}`}>
+                    {status && <StatusIcon size={13} strokeWidth={2.5} aria-hidden="true" />}
+                    {statusLabel}
+                  </span>
+                  {shortSha && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <code className="small">{shortSha}</code>
+                    </>
+                  )}
+                  {status?.manifest && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>{status.manifest.fileCount} files</span>
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="row">
+              <button className="secondary" onClick={reindex} disabled={reindexing || busy}>
+                <RefreshCw size={14} aria-hidden="true" />
+                Re-index
+              </button>
+              <button className="secondary" onClick={() => setMessages([])} disabled={busy || messages.length === 0}>
+                <Trash2 size={14} aria-hidden="true" />
+                Clear chat
+              </button>
+            </div>
+          </div>
+
+          {/* F4: tabs. The chat messages are kept while you look at Hotspots or the Report. */}
+          <div className="tabs" role="tablist" aria-label="Repository views">
+            {(
+              [
+                ["chat", "Chat"],
+                ["hotspots", "Hotspots"],
+                ["report", "Report"],
+              ] as const
+            ).map(([key, label]) => (
+              <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? "tab active" : "tab"} onClick={() => setTab(key)}>
+                {label}
+              </button>
+            ))}
           </div>
         </div>
-        <button className="secondary" onClick={reindex} disabled={reindexing || busy}>Re-index</button>
-        <button className="secondary" onClick={() => setMessages([])} disabled={busy || messages.length === 0}>Clear chat</button>
       </div>
 
       {reindexing && (
-        <IndexProgress
-          onReady={() => {
-            setReindexing(false);
-            loadStatus();
-          }}
-          onFailed={(msg) => {
-            setReindexing(false);
-            setError(msg);
-          }}
-        />
+        <div className="chat-progress">
+          <IndexProgress
+            onReady={() => {
+              setReindexing(false);
+              loadStatus();
+            }}
+            onFailed={(msg) => {
+              setReindexing(false);
+              setError(msg);
+            }}
+          />
+        </div>
       )}
-
-      {/* F4: tabs. The chat messages are kept while you look at Hotspots. */}
-      <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "tab active" : "tab"} onClick={() => setTab("chat")}>
-          Chat
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "hotspots"}
-          className={tab === "hotspots" ? "tab active" : "tab"}
-          onClick={() => setTab("hotspots")}
-        >
-          Hotspots
-        </button>
-        {/* F5 */}
-        <button role="tab" aria-selected={tab === "report"} className={tab === "report" ? "tab active" : "tab"} onClick={() => setTab("report")}>
-          Report
-        </button>
-      </div>
 
       {tab === "hotspots" && <Hotspots repo={repo} />}
       {tab === "report" && <HealthReport repo={repo} />}
 
       {/* Everything below is the Chat tab. */}
       {tab === "chat" && (
-        <>
-          <div className="messages">
+        <main className="chat-column">
+          <div className="messages" aria-busy={busy}>
             {messages.length === 0 && (
               <div className="starters">
                 <p className="muted">Try one of these:</p>
                 {STARTER_QUESTIONS.map((q) => (
-                  <button key={q} className="secondary" onClick={() => ask(q)} disabled={busy || reindexing}>{q}</button>
+                  <button key={q} className="secondary suggestion" onClick={() => ask(q)} disabled={busy || reindexing}>
+                    {q}
+                    <ArrowRight size={14} aria-hidden="true" />
+                  </button>
                 ))}
               </div>
             )}
 
-            {messages.map((m, i) => (
-              <div key={i} className={`message ${m.role}`}>
-                {m.role === "user" ? (
+            {messages.map((m, i) => {
+              const isLatest = i === messages.length - 1;
+              const finished = !(busy && isLatest); // this answer has stopped streaming
+              return m.role === "user" ? (
+                <div key={i} className="message user">
+                  <span className="message-label">You</span>
                   <p>{m.content}</p>
-                ) : (
-                  <>
-                    {m.content ? (
-                      // No rehype-raw: raw HTML in model output is never rendered (ARCHITECTURE §13).
-                      // F1: linkCitations turns [file:L10-L16] in the answer into GitHub links before showing it.
+                </div>
+              ) : (
+                <article key={i} className="message assistant" aria-label="Answer">
+                  <span className="message-label">Answer</span>
+                  {m.content ? (
+                    // No rehype-raw: raw HTML in model output is never rendered (ARCHITECTURE §13).
+                    // F1: linkCitations turns [file:L10-L16] in the answer into GitHub links before showing it.
+                    <div className="markdown">
                       <ReactMarkdown rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
                         {linkCitations(m.content, linkTarget, m.sources ?? [])}
                       </ReactMarkdown>
-                    ) : (
-                      <p className="muted">Thinking…</p>
-                    )}
-                    {m.sources && m.sources.length > 0 && (
-                      <details className="sources">
-                        <summary>Sources ({m.sources.length})</summary>
-                        <ul>
-                          {m.sources.map((s, j) => (
-                            <li key={j}>
-                              {/* F1: each source is a link to those lines on GitHub, opened in a new tab. */}
-                              <a href={sourceUrl(linkTarget, s)} target="_blank" rel="noopener noreferrer">
-                                <code>{s.path}:L{s.startLine}-L{s.endLine}</code>
-                              </a>
-                              {s.symbol && <span className="muted"> {s.symbol}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                    {/* F3: suggested questions. Only under the latest answer, and only after it has finished.
-                        Clicking one asks it straight away. */}
-                    {i === messages.length - 1 && !busy && m.followUps && m.followUps.length > 0 && (
-                      <div className="follow-ups">
-                        <span className="muted small">Ask next:</span>
-                        {m.followUps.map((q) => (
-                          <button key={q} className="secondary" onClick={() => ask(q)} disabled={reindexing}>
-                            {q}
-                          </button>
+                    </div>
+                  ) : (
+                    <p className="thinking">Thinking…</p>
+                  )}
+                  {/* Sources show once the answer has finished streaming. */}
+                  {finished && m.sources && m.sources.length > 0 && (
+                    <details className="sources">
+                      <summary>Sources ({m.sources.length})</summary>
+                      <ul>
+                        {m.sources.map((s, j) => (
+                          <li key={j}>
+                            {/* F1: each source is a link to those lines on GitHub, opened in a new tab. */}
+                            <a href={sourceUrl(linkTarget, s)} target="_blank" rel="noopener noreferrer">
+                              {s.path}:L{s.startLine}-L{s.endLine}
+                            </a>
+                            {s.symbol && <span className="symbol">{s.symbol}</span>}
+                          </li>
                         ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ))}
+                      </ul>
+                    </details>
+                  )}
+                  {/* F3: suggested questions. Only under the latest answer, and only after it has finished.
+                      Clicking one asks it straight away. */}
+                  {isLatest && !busy && m.followUps && m.followUps.length > 0 && (
+                    <div className="follow-ups">
+                      <span>Ask next:</span>
+                      {m.followUps.map((q) => (
+                        <button key={q} className="secondary suggestion" onClick={() => ask(q)} disabled={reindexing}>
+                          {q}
+                          <ArrowRight size={14} aria-hidden="true" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
             <div ref={bottomRef} />
           </div>
 
-          {error && <p className="error">{error}</p>}
+          <div className="composer">
+            {error && (
+              <p className="error" role="alert">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{error}</span>
+              </p>
+            )}
 
-          {/* F2: the two answer-style buttons. The selected one is filled in; the choice applies to the next question. */}
-          <div className="depth-toggle" role="radiogroup" aria-label="Answer style">
-            <span className="muted small">Answer style:</span>
-            {(["executive", "technical"] as const).map((d) => (
-              <button
-                key={d}
-                role="radio"
-                aria-checked={depth === d}
-                className={depth === d ? "" : "secondary"}
-                onClick={() => setDepth(d)}
-                disabled={busy}
-                title={d === "executive" ? "Short, plain-language answers for leaders. No code." : "Full detail with code, for developers."}
-              >
-                {d === "executive" ? "Executive" : "Technical"}
+            {/* F2: the answer-style switch. The choice applies to the next question and is remembered. */}
+            <div className="depth-row">
+              <div className="segmented" role="radiogroup" aria-label="Answer style">
+                {(["executive", "technical"] as const).map((d) => (
+                  <button
+                    key={d}
+                    role="radio"
+                    aria-checked={depth === d}
+                    className="segment"
+                    onClick={() => setDepth(d)}
+                    disabled={busy}
+                    title={DEPTH_HINTS[d]}
+                  >
+                    {d === "executive" ? "Executive" : "Technical"}
+                  </button>
+                ))}
+              </div>
+              <span className="depth-hint">{DEPTH_HINTS[depth]}</span>
+            </div>
+
+            <form
+              className="ask-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                ask(input);
+              }}
+            >
+              <label htmlFor="question" className="sr-only">
+                Ask a question about this repo
+              </label>
+              <input
+                id="question"
+                type="text"
+                placeholder="Ask a question about this repo"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={reindexing || busy}
+                autoComplete="off"
+              />
+              <button type="submit" disabled={busy || reindexing || !input.trim()}>
+                {busy ? (
+                  "Answering…"
+                ) : (
+                  <>
+                    Send
+                    <ArrowUp size={14} strokeWidth={2.25} aria-hidden="true" />
+                  </>
+                )}
               </button>
-            ))}
+            </form>
           </div>
-
-          <form
-            className="row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              ask(input);
-            }}
-          >
-            <input
-              className="grow"
-              placeholder="Ask a question about this repo"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={reindexing}
-            />
-            <button type="submit" disabled={busy || reindexing || !input.trim()}>
-              {busy ? "Answering…" : "Send"}
-            </button>
-          </form>
-        </>
+        </main>
       )}
-    </section>
+    </>
   );
 }

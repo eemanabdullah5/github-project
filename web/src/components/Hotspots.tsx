@@ -3,6 +3,7 @@
 //  1. headline numbers   2. chart of the 10 riskiest files   3. full table
 //  4. files that change together   5. folders only one person works on
 // The analysis runs when the user clicks "Analyse history" (it only uses GitHub, not the AI).
+import { AlertCircle, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { analyzeHotspots, getHotspots, type HistoryReport, type HotspotFile, type Repo } from "../api";
 import { githubLineUrl, type LinkTarget } from "../sourceLinks";
@@ -17,7 +18,21 @@ interface Props {
 
 // Shows a date like "8 Nov 2026".
 function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Shortens a long path from the start, so the file name stays visible: "…/routers/submissions.py".
+function shortPath(path: string, max = 36): string {
+  if (path.length <= max) return path;
+  const parts = path.split("/");
+  let out = parts[parts.length - 1];
+  if (out.length + 2 > max) return `…${out.slice(-(max - 1))}`; // the file name alone is too long
+  for (let i = parts.length - 2; i >= 0; i--) {
+    const next = `${parts[i]}/${out}`;
+    if (next.length + 2 > max) break;
+    out = next;
+  }
+  return `…/${out}`;
 }
 
 // Link to a whole file on GitHub (line 1), at the version that was measured. Reuses F1.
@@ -53,26 +68,44 @@ export default function Hotspots({ repo }: Props) {
     }
   }
 
-  if (loading) return <p className="muted">Loading…</p>;
+  if (loading) {
+    return (
+      <div className="tab-page">
+        <p className="muted">Loading…</p>
+      </div>
+    );
+  }
 
-  const button = (
-    <button onClick={analyse} disabled={analysing}>
-      {analysing ? "Analysing…" : report ? "Refresh" : "Analyse history"}
-    </button>
+  const errorLine = error && (
+    <p className="error" role="alert">
+      <AlertCircle size={16} aria-hidden="true" />
+      <span>{error}</span>
+    </p>
   );
 
   // Not analysed yet: explain what this does and show the button.
   if (!report) {
     return (
-      <div className="panel">
-        <p>
-          <strong>Hotspots</strong> show which files change most often and are most complex: that's usually where bugs and
-          slow delivery come from. They also show files that change together, and areas only one person works on.
-        </p>
-        <p className="muted small">Reads the last 12 months of commits from GitHub. No code is sent to the AI.</p>
-        {button}
-        {analysing && <p className="muted small">Reading git history… this can take up to a minute or two for busy repos.</p>}
-        {error && <p className="error">{error}</p>}
+      <div className="tab-page intro">
+        <section className="panel intro-panel">
+          <h2>Find the risky parts of the codebase</h2>
+          <p className="lede">
+            <strong>Hotspots</strong> show which files change most often and are most complex: that's usually where bugs and
+            slow delivery come from. They also show files that change together, and areas only one person works on.
+          </p>
+          <p className="muted small">Reads the last 12 months of commits from GitHub. No code is sent to the AI.</p>
+          <div className="row">
+            <button onClick={analyse} disabled={analysing}>
+              {analysing ? "Analysing…" : "Analyse history"}
+            </button>
+            {analysing && (
+              <span className="muted small" role="status">
+                Reading git history… this can take up to a minute or two for busy repos.
+              </span>
+            )}
+          </div>
+          {errorLine}
+        </section>
       </div>
     );
   }
@@ -82,22 +115,25 @@ export default function Hotspots({ repo }: Props) {
   const riskyAreas = report.areas.filter((a) => a.singleContributor);
 
   return (
-    <section className="hotspots">
+    <div className="tab-page">
       {/* Top line: what was analysed, and the Refresh button. */}
-      <div className="row">
-        <p className="muted small grow">
+      <div className="top-line">
+        <p>
           Last 12 months · analysed {shortDate(report.generatedAt)}
           {report.reachedLimit && " · only the newest 500 commits were used"}
         </p>
-        {button}
+        <button className="secondary" onClick={analyse} disabled={analysing}>
+          <RefreshCw size={14} aria-hidden="true" />
+          {analysing ? "Analysing…" : "Refresh"}
+        </button>
       </div>
-      {error && <p className="error">{error}</p>}
+      {errorLine}
 
       {/* 1. Headline numbers */}
       <div className="stat-row">
         <Stat label="Commits analysed" value={report.commitsAnalyzed} />
         <Stat label="Files changed" value={report.filesChanged} />
-        <Stat label="Areas with one contributor" value={riskyAreas.length} />
+        <Stat label="Areas with one contributor" value={riskyAreas.length} warn={riskyAreas.map((a) => a.area).join(", ")} />
       </div>
 
       {report.commitsAnalyzed === 0 && <p className="muted">No commits in the last 12 months, so there's nothing to show.</p>}
@@ -107,28 +143,32 @@ export default function Hotspots({ repo }: Props) {
 
       {/* 2. Chart of the riskiest files */}
       {chartFiles.length > 0 && (
-        <>
-          <h3>Top hotspots</h3>
-          <p className="muted small">Risk score = how often a file changes × how complex it is. The riskiest file is 100.</p>
+        <section className="panel chart-card" aria-labelledby="hs-top">
+          <div className="section-head">
+            <h2 id="hs-top">Top hotspots</h2>
+            <p>Risk score = how often a file changes × how complex it is. The riskiest file is 100.</p>
+          </div>
           <HotspotChart files={chartFiles} target={target} />
-        </>
+        </section>
       )}
 
       {/* 3. Full table (also the accessible version of the chart) */}
       {report.files.length > 0 && (
-        <>
-          <h3>All changed files</h3>
-          <div className="table-wrap">
+        <section className="section" aria-labelledby="hs-all">
+          <div className="section-head">
+            <h2 id="hs-all">All changed files</h2>
+          </div>
+          <div className="card table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>File</th>
-                  <th className="num">Changes</th>
-                  <th className="num">Complexity</th>
-                  <th className="num">Lines</th>
-                  <th className="num">People</th>
-                  <th>Last changed</th>
-                  <th className="num">Score</th>
+                  <th scope="col">File</th>
+                  <th scope="col" className="num">Changes</th>
+                  <th scope="col" className="num">Complexity</th>
+                  <th scope="col" className="num">Lines</th>
+                  <th scope="col" className="num">People</th>
+                  <th scope="col" className="num">Last changed</th>
+                  <th scope="col" className="num">Score</th>
                 </tr>
               </thead>
               <tbody>
@@ -136,128 +176,160 @@ export default function Hotspots({ repo }: Props) {
                   <tr key={f.path}>
                     <td>
                       <a href={fileUrl(target, f.path)} target="_blank" rel="noopener noreferrer">
-                        <code>{f.path}</code>
+                        {f.path}
                       </a>
                     </td>
                     <td className="num">{f.changes}</td>
                     <td className="num">{f.complexity}</td>
                     <td className="num">{f.lines}</td>
                     <td className="num">{f.authors}</td>
-                    <td>{shortDate(f.lastChanged)}</td>
-                    <td className="num">{f.score}</td>
+                    <td className="num nowrap">{shortDate(f.lastChanged)}</td>
+                    <td className="num">
+                      <strong>{f.score}</strong>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           {report.files.length > TABLE_FILES && (
-            <p className="muted small">Showing the top {TABLE_FILES} of {report.filesChanged} files.</p>
+            <p className="muted small">
+              Showing the top {TABLE_FILES} of {report.filesChanged} files.
+            </p>
           )}
-        </>
+        </section>
       )}
 
-      {/* 4. Files that change together */}
-      <h3>Files that change together</h3>
-      {report.coChange.length === 0 ? (
-        <p className="muted small">No pair of files changed together 3 or more times.</p>
-      ) : (
-        <>
-          <p className="muted small">Often changed in the same commit. This can mean a hidden dependency between them.</p>
-          <ul className="plain-list">
-            {report.coChange.map((p) => (
-              <li key={`${p.a}|${p.b}`}>
-                <code>{p.a}</code> ⇄ <code>{p.b}</code>
-                <span className="muted">
-                  {" "}
-                  — together {p.count} times ({p.percent}%)
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <div className="two-col">
+        {/* 4. Files that change together */}
+        <section className="section" aria-labelledby="hs-pairs">
+          <div className="section-head">
+            <h2 id="hs-pairs">Files that change together</h2>
+            <p>Often changed in the same commit. This can mean a hidden dependency between them.</p>
+          </div>
+          {report.coChange.length === 0 ? (
+            <p className="card list-message">No pair of files changed together 3 or more times.</p>
+          ) : (
+            <ul className="card pair-list">
+              {report.coChange.map((p) => (
+                <li key={`${p.a}|${p.b}`}>
+                  <span className="pair-files">
+                    <a href={fileUrl(target, p.a)} target="_blank" rel="noopener noreferrer">{p.a}</a>
+                    <span className="arrow" aria-label="and">⇄</span>
+                    <a href={fileUrl(target, p.b)} target="_blank" rel="noopener noreferrer">{p.b}</a>
+                  </span>
+                  <span className="muted small">
+                    Together {p.count} times ({p.percent}%)
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-      {/* 5. Knowledge risk: no names, only counts */}
-      <h3>Knowledge risk</h3>
-      <p className="muted small">How many different people changed each top-level folder. No names are shown or stored.</p>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Area</th>
-              <th className="num">Commits</th>
-              <th className="num">People</th>
-              <th className="num">Files</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.areas.map((a) => (
-              <tr key={a.area}>
-                <td>
-                  <code>{a.area}</code>
-                </td>
-                <td className="num">{a.commits}</td>
-                <td className="num">{a.authors}</td>
-                <td className="num">{a.files}</td>
-                {/* Icon + words, so it doesn't rely on colour alone. */}
-                <td>{a.singleContributor ? <span className="warn">⚠ Only one person</span> : <span className="muted">OK</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {/* 5. Knowledge risk: no names, only counts */}
+        <section className="section" aria-labelledby="hs-areas">
+          <div className="section-head">
+            <h2 id="hs-areas">Knowledge risk</h2>
+            <p>How many different people changed each top-level folder. No names are shown or stored.</p>
+          </div>
+          <div className="card table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Area</th>
+                  <th scope="col" className="num">Commits</th>
+                  <th scope="col" className="num">People</th>
+                  <th scope="col" className="num">Files</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.areas.map((a) => (
+                  <tr key={a.area}>
+                    <td>
+                      <code>{a.area}</code>
+                    </td>
+                    <td className="num">{a.commits}</td>
+                    <td className="num">{a.authors}</td>
+                    <td className="num">{a.files}</td>
+                    {/* Icon + words, so it doesn't rely on colour alone. */}
+                    <td>
+                      {a.singleContributor ? <span className="warn-pill">⚠ Only one person</span> : <span className="muted small">OK</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
-      <p className="muted small">
-        Skipped: {report.skipped.merges} merge commits and {report.skipped.bots} bot commits. {report.skipped.large} large
-        commits (over 30 files) count for hotspots but were left out of "files that change together".
+      <p className="footnote">
+        Skipped: {report.skipped.merges} merge commits and {report.skipped.bots} bot commits. {report.skipped.large} large{" "}
+        {report.skipped.large === 1 ? "commit" : "commits"} (over 30 files) counted for hotspots but{" "}
+        {report.skipped.large === 1 ? "was" : "were"} left out of “files that change together”.
       </p>
-    </section>
-  );
-}
-
-// One headline number with its label.
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="stat">
-      <div className="muted small">{label}</div>
-      <div className="stat-value">{value.toLocaleString()}</div>
     </div>
   );
 }
 
-// Horizontal bar chart: one bar per file, length = risk score (0–100).
-// Hover or keyboard-focus a row to see its details in a small tooltip.
+// One headline number with its label (and, optionally, which areas need attention).
+function Stat({ label, value, warn }: { label: string; value: number; warn?: string }) {
+  return (
+    <div className="card stat">
+      <span className="stat-label">{label}</span>
+      <span className="row">
+        <span className="stat-value">{value.toLocaleString()}</span>
+        {warn && <span className="warn-pill">⚠ {warn}</span>}
+      </span>
+    </div>
+  );
+}
+
+// Horizontal bar chart: one bar per file, length = risk score (0–100), in the single accent colour.
+// Hover a row, or tab to its file link, to see the details in a tooltip.
 function HotspotChart({ files, target }: { files: HotspotFile[]; target: LinkTarget }) {
   return (
-    <div className="bar-chart" role="list" aria-label="Top hotspots by risk score">
-      {files.map((f) => (
-        <div
-          key={f.path}
-          className="bar-row"
-          role="listitem"
-          tabIndex={0}
-          aria-label={`${f.path}: score ${f.score}, ${f.changes} changes, complexity ${f.complexity}`}
-        >
-          <a className="bar-label" href={fileUrl(target, f.path)} target="_blank" rel="noopener noreferrer" title={f.path}>
-            {f.path}
-          </a>
-          <div className="bar-track">
-            {/* At least 2% wide, so a tiny score is still visible. */}
-            <div className="bar" style={{ width: `${Math.max(f.score, 2)}%` }} />
-            <span className="bar-value">{f.score}</span>
-          </div>
-          <div className="bar-tooltip" role="tooltip">
-            <strong>{f.path}</strong>
-            <div>
-              {f.changes} changes · complexity {f.complexity} · {f.lines} lines
+    <>
+      <ul className="bar-chart" aria-label="Top hotspots by risk score" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {files.map((f) => (
+          <li key={f.path} className="bar-row">
+            <a
+              className="bar-label"
+              href={fileUrl(target, f.path)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={f.path}
+              aria-label={`${f.path}: score ${f.score}, ${f.changes} changes, complexity ${f.complexity}`}
+            >
+              {shortPath(f.path)}
+            </a>
+            <div className="bar-track" aria-hidden="true">
+              {/* At least 2% wide, so a tiny score is still visible. 44px leaves room for the number. */}
+              <div className="bar" style={{ width: `calc((100% - 44px) * ${Math.max(f.score, 2) / 100})` }} />
+              <span className="bar-value">{f.score}</span>
             </div>
-            <div>
-              {f.authors} {f.authors === 1 ? "person" : "people"} · last changed {shortDate(f.lastChanged)}
+            <div className="bar-tooltip" role="tooltip">
+              <strong>{f.path}</strong>
+              <span>
+                {f.changes} changes · complexity {f.complexity} · {f.lines} lines
+              </span>
+              <span className="tip-muted">
+                {f.authors} {f.authors === 1 ? "person" : "people"} · last changed {shortDate(f.lastChanged)}
+              </span>
             </div>
-          </div>
+          </li>
+        ))}
+      </ul>
+      <div className="chart-axis" aria-hidden="true">
+        <span />
+        <div>
+          <span>0</span>
+          <span>50</span>
+          <span>100</span>
         </div>
-      ))}
-    </div>
+      </div>
+    </>
   );
 }

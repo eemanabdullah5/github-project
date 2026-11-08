@@ -1,6 +1,7 @@
 // F5 — Report tab.
 // Shows the repo's health report and lets the user generate a new one or download it as a Markdown file.
 // The report is saved on the server, so it opens instantly the next time.
+import { AlertCircle, Download, Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { generateReport, getReport, type HealthReport as Report, type Repo } from "../api";
@@ -54,26 +55,47 @@ export default function HealthReport({ repo }: Props) {
     }
   }
 
-  if (loading) return <p className="muted">Loading…</p>;
+  if (loading) {
+    return (
+      <div className="tab-page">
+        <p className="muted">Loading…</p>
+      </div>
+    );
+  }
 
-  const button = (
-    <button onClick={generate} disabled={generating}>
-      {generating ? "Generating…" : report ? "Regenerate" : "Generate report"}
-    </button>
+  const errorLine = error && (
+    <p className="error" role="alert">
+      <AlertCircle size={16} aria-hidden="true" />
+      <span>{error}</span>
+    </p>
   );
 
   // No report yet: explain what it is and show the button.
   if (!report) {
     return (
-      <div className="panel">
-        <p>
-          A one-page <strong>health report</strong> for leaders: what the project does, tech stack, structure, dependencies,
-          risks, onboarding notes, and hotspots from the git history.
-        </p>
-        <p className="muted small">Tip: run "Analyse history" in the Hotspots tab first, so the report includes hotspots.</p>
-        {button}
-        {generating && <p className="muted small">Writing the report… this usually takes 20-40 seconds.</p>}
-        {error && <p className="error">{error}</p>}
+      <div className="tab-page intro">
+        <section className="panel intro-panel">
+          <h2>A one-page summary you can forward</h2>
+          <p className="lede">
+            A one-page <strong>health report</strong> for leaders: what the project does, tech stack, structure, dependencies,
+            risks, onboarding notes, and hotspots from the git history.
+          </p>
+          <p className="muted small row" style={{ alignItems: "flex-start", flexWrap: "nowrap" }}>
+            <Info size={14} aria-hidden="true" style={{ flex: "none", marginTop: 3 }} />
+            <span>Tip: run “Analyse history” in the Hotspots tab first, so the report includes hotspots.</span>
+          </p>
+          <div className="row">
+            <button onClick={generate} disabled={generating}>
+              {generating ? "Writing the report…" : "Generate report"}
+            </button>
+            {generating && (
+              <span className="muted small" role="status">
+                Writing the report… this usually takes 20–40 seconds.
+              </span>
+            )}
+          </div>
+          {errorLine}
+        </section>
       </div>
     );
   }
@@ -81,25 +103,43 @@ export default function HealthReport({ repo }: Props) {
   // Citations become GitHub links at the commit the report describes (F1).
   const target: LinkTarget = { owner: repo.owner, name: repo.name, ref: report.commitSha };
   const linkedMarkdown = linkCitations(report.markdown, target, report.sources);
+  const generatedAt = new Date(report.generatedAt).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
-    <section className="report">
+    <div className="tab-page" style={{ gap: 20 }}>
       {/* Top line: when it was made, and the buttons. */}
-      <div className="row">
-        <p className="muted small grow">Generated {new Date(report.generatedAt).toLocaleString()}</p>
-        {/* The downloaded file has the same clickable GitHub links. */}
-        <button className="secondary" onClick={() => downloadFile(`${repo.owner}-${repo.name}-health-report.md`, linkedMarkdown)}>
-          Download .md
-        </button>
-        {button}
+      <div className="top-line report-toolbar">
+        <p>Generated {generatedAt}</p>
+        <div className="row">
+          {/* The downloaded file has the same clickable GitHub links. */}
+          <button className="secondary" onClick={() => downloadFile(`${repo.owner}-${repo.name}-health-report.md`, linkedMarkdown)}>
+            <Download size={14} aria-hidden="true" />
+            Download .md
+          </button>
+          <button onClick={generate} disabled={generating}>
+            {generating ? "Regenerating…" : "Regenerate"}
+          </button>
+        </div>
       </div>
-      {generating && <p className="muted small">Writing a new report… this usually takes 20-40 seconds.</p>}
-      {error && <p className="error">{error}</p>}
+      {generating && (
+        <p className="muted small report-toolbar" role="status">
+          Writing a new report… this usually takes 20–40 seconds.
+        </p>
+      )}
+      {error && <div className="report-toolbar">{errorLine}</div>}
 
-      {/* The report itself, shown the same way as chat answers (no raw HTML). */}
-      <div className="report-body">
-        <ReactMarkdown components={markdownComponents}>{linkedMarkdown}</ReactMarkdown>
-      </div>
-    </section>
+      {/* The report itself, rendered like a document (no raw HTML). */}
+      <article className="report-page">
+        <div className="markdown">
+          <ReactMarkdown components={markdownComponents}>{linkedMarkdown}</ReactMarkdown>
+        </div>
+      </article>
+    </div>
   );
 }

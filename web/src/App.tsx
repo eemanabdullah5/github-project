@@ -2,6 +2,7 @@
 //  - which view is showing (the repo browser or the chat)
 //  - the selected repo and its chat messages
 //  - the light/dark theme, shown as a toggle in the header of both views
+import { GitBranch, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ChatMessage, Repo } from "./api";
 import Chat from "./views/Chat";
@@ -36,16 +37,27 @@ export default function App() {
   }
 
   return (
-    <div className="container">
+    <>
       <header className="app-header">
-        <h1>GitHub Repository AI Assistant</h1>
-        <button
-          className="secondary"
-          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-          aria-label="Toggle light and dark theme"
-        >
-          {theme === "light" ? "🌙 Dark" : "☀️ Light"}
-        </button>
+        <div className="app-header-inner">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              <GitBranch size={16} strokeWidth={2} />
+            </span>
+            <div className="brand-text">
+              <h1 className="brand-name">Repo Assistant</h1>
+              <span className="brand-sub">GitHub Repository AI Assistant</span>
+            </div>
+          </div>
+          <button
+            className="icon-button"
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+            title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+          >
+            {theme === "light" ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
+          </button>
+        </div>
       </header>
 
       {view === "chat" && repo ? (
@@ -53,6 +65,6 @@ export default function App() {
       ) : (
         <RepoBrowser onOpenChat={openChat} />
       )}
-    </div>
+    </>
   );
 }
