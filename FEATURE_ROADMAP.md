@@ -41,7 +41,7 @@ Built in this order, because later features reuse earlier ones.
 |---|---|---|---|---|
 | F1 | **Clickable sources**: each cited file opens on GitHub at the exact lines of the indexed commit | Claude Code | S | ✅ Done |
 | F2 | **Executive / Technical toggle**: short leader answers or detailed developer answers | PRD | S | ✅ Done |
-| F3 | **Suggested follow-up questions** after each answer | Claude Code | S | Planned |
+| F3 | **Suggested follow-up questions** after each answer | Claude Code | S | ✅ Done |
 | F4 | **Git history hotspots**: which files change most, how complex they are, which files change together, and which areas only one person works on | Opus + Claude Code | M | Planned |
 | F5 | **Repo health report**: one click gives a summary, tech stack, structure, dependencies, hotspots and risks, downloadable as Markdown | Claude Code + Opus | M | Planned |
 
@@ -163,3 +163,31 @@ The choice applies to the next question, and the browser remembers it.
 | [server/tests/rag.test.ts](server/tests/rag.test.ts), [server/tests/app.test.ts](server/tests/app.test.ts) | 3 tests: technical is the default, executive adds its rules, and the API passes the value through (unknown values become technical) |
 
 **How to demo:** ask *"How does it handle memory?"* with **Executive** selected, then switch to **Technical** and ask again.
+
+### F3 — Suggested follow-up questions ✅
+
+**What it does:** after each answer finishes, 3 clickable questions appear under it ("Ask next: …"). Clicking one asks it straight away. This helps non-technical users keep exploring without knowing what to ask.
+
+**How it works:**
+1. While the answer streams to the browser, the chat route also keeps a copy of the full answer text.
+2. When the answer ends, it calls `suggestFollowUps(question, answer, depth)` in `rag.ts`. That's one short extra AI call asking for 3 follow-up questions, one per line, that can be answered from the repo's code. In Executive mode (F2) it asks for questions a CTO would ask, in Technical mode questions a developer would ask.
+3. `parseFollowUps()` cleans the reply: it removes bullets, numbers and quotes, keeps only lines ending in `?`, drops very short or long lines, and keeps at most 3.
+4. The questions are sent as a new event. The stream order is now **`sources` → `token`… → `followups` → `done`**.
+5. **Failure-safe:** if the extra call fails, it returns an empty list. The answer is already complete, so the user just sees no suggestions.
+6. The buttons only show under the **latest** answer, and only once it has finished.
+
+**Real examples:** Executive: *"What third-party libraries are required to run the project?"* Technical: *"How does `RecommenderAgent` implement defensive copying for its catalog?"*
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/rag.ts](server/src/rag.ts) | New `suggestFollowUps()` and `parseFollowUps()` |
+| [server/src/app.ts](server/src/app.ts) | The chat route keeps the answer text, then sends `followups` before `done` |
+| [web/src/api.ts](web/src/api.ts) | `followUps` on `ChatMessage`. `streamChat()` handles the `followups` event (`onFollowUps`). |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | The "Ask next" buttons under the latest answer |
+| [web/src/index.css](web/src/index.css) | Button styles |
+| [server/tests/rag.test.ts](server/tests/rag.test.ts), [server/tests/app.test.ts](server/tests/app.test.ts) | Tests for the cleanup and the new event order |
+
+**Trade-off:** one extra AI call per question, which adds about 1–2 seconds before the question box unlocks.
+
+**How to demo:** ask any question → when the answer finishes, click one of the "Ask next" buttons.

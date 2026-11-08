@@ -3,6 +3,7 @@
 // Answers stream in word by word, are rendered as Markdown with highlighted code, and list their sources.
 // F1: file names in answers and in the Sources list are links that open the code on GitHub.
 // F2: Executive / Technical buttons choose how detailed the answers are.
+// F3: after each answer, 3 suggested follow-up questions appear as buttons.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -84,6 +85,8 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
       await streamChat(repo.owner, repo.name, text, history, depth, {
         onSources: (sources) => updateLastMessage((m) => ({ ...m, sources })),
         onToken: (token) => updateLastMessage((m) => ({ ...m, content: m.content + token })),
+        // F3: save the suggested questions on the answer, so they show under it.
+        onFollowUps: (followUps) => updateLastMessage((m) => ({ ...m, followUps })),
       });
     } catch (err) {
       setError((err as Error).message);
@@ -181,6 +184,18 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
                       ))}
                     </ul>
                   </details>
+                )}
+                {/* F3: suggested questions. Only under the latest answer, and only after it has finished.
+                    Clicking one asks it straight away. */}
+                {i === messages.length - 1 && !busy && m.followUps && m.followUps.length > 0 && (
+                  <div className="follow-ups">
+                    <span className="muted small">Ask next:</span>
+                    {m.followUps.map((q) => (
+                      <button key={q} className="secondary" onClick={() => ask(q)} disabled={reindexing}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </>
             )}

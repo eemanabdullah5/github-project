@@ -8,7 +8,7 @@ import { ROOT_DIR } from "./config.js";
 import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
-import { answer, type AnswerDepth } from "./rag.js";
+import { answer, suggestFollowUps, type AnswerDepth } from "./rag.js";
 import type { ChatMessage, Repo } from "./types.js";
 
 /** The repo list, kept in memory so we don't ask GitHub again on every page load. */
@@ -69,7 +69,8 @@ export function createApp() {
     res.json(getJob());
   });
 
-  // Chat: body is { question, history, depth }. Streams the answer as Server-Sent Events: "sources", then many "token", then "done" (or "error").
+  // Chat: body is { question, history, depth }. Streams the answer as Server-Sent Events in this order:
+  // "sources", then many "token", then "followups" (F3), then "done". Or "error" if something fails.
   app.post("/api/repos/:owner/:repo/chat", async (req, res) => {
     const { owner, repo } = repoParams(req);
     const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
@@ -92,10 +93,14 @@ export function createApp() {
     try {
       const { sources, tokens } = await answer(toRepoId(owner, repo), question, history, depth);
       send("sources", sources);
+      let answerText = ""; // F3: keep a copy of the full answer, to base the follow-up questions on
       for await (const token of tokens) {
         if (closed) break;
+        answerText += token;
         send("token", token);
       }
+      // F3: once the answer is complete, send 3 suggested follow-up questions (skipped if the user left).
+      if (!closed) send("followups", await suggestFollowUps(question, answerText, depth));
       send("done", {});
     } catch (err) {
       send("error", { error: userMessage(err) });

@@ -3,6 +3,7 @@
 //  2. Turn the question into a vector and fetch the 8 closest code chunks.
 //  3. Build a prompt: rules + README/file tree + chunks + recent history + the question.
 //  4. Stream the model's answer back, with the list of sources.
+//  5. F3: after the answer, suggest 3 follow-up questions the user might ask next.
 import { CHARS_PER_TOKEN, HISTORY_TURNS, MAX_README_TOKENS, MAX_TREE_LINES, NUM_CTX, TOP_K } from "./config.js";
 import { AppError } from "./errors.js";
 import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
@@ -133,6 +134,47 @@ export async function rewriteQuestion(question: string, history: ChatMessage[]):
     { role: "user", content: `Conversation:\n${conversation}\n\nLast question: ${question}` },
   ]);
   return rewritten.trim() || question;
+}
+
+// F3: the most follow-up questions shown under an answer.
+const MAX_FOLLOW_UPS = 3;
+
+// F3: tidies the AI's reply into a clean list of questions.
+// Example reply: "1. How is auth handled?\n- Where are the tests?\nHere you go"
+// Result:        ["How is auth handled?", "Where are the tests?"]
+export function parseFollowUps(text: string): string[] {
+  return (
+    text
+      .split("\n") // one question per line
+      // Remove bullets and numbers at the start ("-", "*", "•", "1.", "2)"), then quotes around the line.
+      .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").replace(/^["']|["']$/g, "").trim())
+      // Keep only real questions: ends with "?", and not too short or too long for a button.
+      .filter((line) => line.endsWith("?") && line.length >= 8 && line.length <= 150)
+      .slice(0, MAX_FOLLOW_UPS) // at most 3
+  );
+}
+
+// F3: asks the AI for 3 short follow-up questions, based on the last question and its answer.
+// In Executive mode it asks for questions a CTO would ask; in Technical mode, questions a developer would ask.
+// Suggestions are a nice extra, so if anything goes wrong we just return an empty list.
+export async function suggestFollowUps(question: string, answerText: string, depth: AnswerDepth = "technical"): Promise<string[]> {
+  const reader = depth === "executive" ? "a CTO or engineering manager" : "a developer";
+  try {
+    const reply = await chat([
+      {
+        role: "system",
+        content:
+          `Suggest ${MAX_FOLLOW_UPS} short follow-up questions that ${reader} might ask next about this code repository, ` +
+          "based on the question and answer below. Each must be answerable from the repository's code. " +
+          "Reply with one question per line and nothing else.",
+      },
+      // Only the first 4,000 characters of the answer are sent, to keep this extra call small and fast.
+      { role: "user", content: `Question: ${question}\n\nAnswer:\n${answerText.slice(0, 4000)}` },
+    ]);
+    return parseFollowUps(reply);
+  } catch {
+    return []; // no suggestions; the answer itself is not affected
+  }
 }
 
 /** Turns chunks into the Sources list shown under an answer. */

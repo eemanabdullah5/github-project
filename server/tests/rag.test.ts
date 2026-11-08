@@ -1,7 +1,7 @@
 // Tests for buildPrompt: order, delimiters, history window and the prompt budget.
 import { describe, expect, it } from "vitest";
 import { MAX_TREE_LINES } from "../src/config.js";
-import { DEPTH_RULES, SYSTEM_RULES, buildPrompt } from "../src/rag.js";
+import { DEPTH_RULES, SYSTEM_RULES, buildPrompt, parseFollowUps } from "../src/rag.js";
 import type { ChatMessage, Chunk } from "../src/types.js";
 
 const chunk = (id: string, text = `code ${id}`): Chunk => ({
@@ -68,5 +68,17 @@ describe("buildPrompt", () => {
     const { messages } = buildPrompt({ question: "q", history: [], chunks: [], manifest, depth: "executive" });
     expect(messages[0].content).toContain(DEPTH_RULES.executive);
     expect(messages[0].content).toContain("Do not include code snippets");
+  });
+});
+
+// F3: cleaning the AI's follow-up suggestions
+describe("parseFollowUps", () => {
+  it("removes bullets, numbers and quotes, and keeps at most 3", () => {
+    const reply = '1. How is auth handled?\n- Where are the tests?\n* "What does the API expose?"\n2) Which database is used?';
+    expect(parseFollowUps(reply)).toEqual(["How is auth handled?", "Where are the tests?", "What does the API expose?"]);
+  });
+
+  it("ignores lines that aren't questions, or are too short", () => {
+    expect(parseFollowUps("Here are some ideas:\n\nWhat is the entry point?\nok?")).toEqual(["What is the entry point?"]);
   });
 });

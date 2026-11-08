@@ -46,6 +46,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  followUps?: string[]; // F3: suggested next questions, shown as buttons under the latest answer
 }
 
 /**
@@ -117,7 +118,11 @@ export async function streamChat(
   question: string,
   history: ChatMessage[],
   depth: AnswerDepth, // F2: the answer style chosen with the toggle
-  handlers: { onSources: (sources: Source[]) => void; onToken: (text: string) => void },
+  handlers: {
+    onSources: (sources: Source[]) => void;
+    onToken: (text: string) => void;
+    onFollowUps: (questions: string[]) => void; // F3: called once, after the answer is complete
+  },
 ): Promise<void> {
   let res: Response;
   try {
@@ -147,6 +152,7 @@ export async function streamChat(
       const data = JSON.parse(raw.match(/^data: (.*)$/m)?.[1] ?? "null");
       if (event === "sources") handlers.onSources(data);
       if (event === "token") handlers.onToken(data);
+      if (event === "followups") handlers.onFollowUps(data); // F3
       if (event === "error") throw new Error(data.error);
       if (event === "done") return;
     }

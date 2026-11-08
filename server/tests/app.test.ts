@@ -21,6 +21,7 @@ vi.mock("../src/indexer.js", () => ({
     }),
 }));
 vi.mock("../src/rag.js", () => ({
+  suggestFollowUps: vi.fn(async () => ["What next?"]), // F3
   answer: vi.fn(async (..._args: unknown[]) => ({
     sources: [{ path: "a.ts", startLine: 1, endLine: 2, symbol: "" }],
     tokens: (async function* () {
@@ -92,7 +93,7 @@ describe("POST /api/repos/:owner/:repo/index", () => {
 });
 
 describe("POST /api/repos/:owner/:repo/chat", () => {
-  it("streams sources, tokens, then done", async () => {
+  it("streams sources, tokens, follow-ups (F3), then done", async () => {
     const res = await fetch(`${baseUrl}/api/repos/octo/hello/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,7 +101,7 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
     });
     expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
     const events = (await res.text()).trim().split("\n\n").map((e) => e.split("\n")[0]);
-    expect(events).toEqual(["event: sources", "event: token", "event: token", "event: done"]);
+    expect(events).toEqual(["event: sources", "event: token", "event: token", "event: followups", "event: done"]);
   });
 
   // F2: the answer style from the browser reaches rag.answer() (4th argument).

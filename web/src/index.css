@@ -328,3 +328,17 @@ a {
   padding: 0.2rem 0.75rem;
   font-size: 0.9rem;
 }
+
+/* F3: suggested follow-up question buttons under the latest answer */
+.follow-ups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+.follow-ups button {
+  font-size: 0.9rem;
+  text-align: left;
+}
