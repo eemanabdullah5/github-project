@@ -39,6 +39,33 @@ export interface Source {
   symbol: string;
 }
 
+// F4: git history hotspot report (same shape as HistoryReport in server/src/types.ts).
+export interface HotspotFile {
+  path: string;
+  changes: number; // how many commits changed it
+  linesAdded: number;
+  linesDeleted: number;
+  authors: number; // how many different people changed it
+  lastChanged: string;
+  lines: number;
+  complexity: number; // decision points (if, for, while, …)
+  score: number; // 0-100, riskiest file = 100
+}
+
+export interface HistoryReport {
+  repoId: string;
+  commitSha: string; // the code version that was measured (used for GitHub links)
+  generatedAt: string;
+  since: string;
+  commitsAnalyzed: number;
+  skipped: { merges: number; bots: number; large: number };
+  reachedLimit: boolean;
+  filesChanged: number; // total files changed (the list shows only the top 100)
+  files: HotspotFile[];
+  coChange: Array<{ a: string; b: string; count: number; percent: number }>;
+  areas: Array<{ area: string; commits: number; authors: number; files: number; singleContributor: boolean }>;
+}
+
 // F2: answer style. "executive" = short and simple, "technical" = full detail with code.
 export type AnswerDepth = "executive" | "technical";
 
@@ -97,6 +124,22 @@ export function getStatus(owner: string, name: string): Promise<StatusResponse> 
 /** Starts indexing. Throws "Another repo is being indexed" if a job is already running. */
 export function startIndex(owner: string, name: string): Promise<IndexJob> {
   return request(`${repoPath(owner, name)}/index`, { method: "POST" });
+}
+
+// F4: the saved hotspot report, or null if this repo's history hasn't been analysed yet.
+export async function getHotspots(owner: string, name: string): Promise<HistoryReport | null> {
+  try {
+    return await request<HistoryReport>(`${repoPath(owner, name)}/hotspots`);
+  } catch (err) {
+    // "Not analysed yet" is a normal state, not an error, so it becomes null.
+    if ((err as Error).message.includes("hasn't been analysed yet")) return null;
+    throw err;
+  }
+}
+
+// F4: analyses the repo's git history now and returns the new report. Can take up to a minute or two.
+export function analyzeHotspots(owner: string, name: string): Promise<HistoryReport> {
+  return request(`${repoPath(owner, name)}/hotspots`, { method: "POST" });
 }
 
 /** The current indexing job, or null if none has run since the server started. */

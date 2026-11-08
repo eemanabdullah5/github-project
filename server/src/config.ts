@@ -45,6 +45,16 @@ export const config = {
 // GitHub
 export const MAX_REPOS = 1000;
 
+// F4: git history hotspots. GitHub needs one request per commit to tell us which files changed,
+// so we limit how far back we look. GitHub allows 5,000 requests per hour with a token.
+export const HISTORY_MONTHS = 12; // look at the last 12 months only
+export const MAX_COMMITS = 500; // and at most 500 commits
+// Commits that changed more than 30 files still count for hotspots, but are left out of "files that change together":
+// one 46-file commit would otherwise create 1,035 fake pairs.
+export const MAX_FILES_PER_COMMIT = 30;
+export const MIN_CO_CHANGES = 3; // two files must change together at least 3 times to be listed
+export const HISTORY_CONCURRENCY = 5; // how many commit requests we send to GitHub at the same time
+
 // Ingestion limits
 export const MAX_FILES = 1000;
 export const MAX_TOTAL_BYTES = 20 * 1024 * 1024;

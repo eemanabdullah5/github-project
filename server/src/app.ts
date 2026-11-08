@@ -7,6 +7,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { ROOT_DIR } from "./config.js";
 import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
+import { analyzeHistory, loadHistory } from "./gitHistory.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import { answer, suggestFollowUps, type AnswerDepth } from "./rag.js";
 import type { ChatMessage, Repo } from "./types.js";
@@ -62,6 +63,20 @@ export function createApp() {
   app.post("/api/repos/:owner/:repo/index", (req, res) => {
     const { owner, repo } = repoParams(req);
     res.status(202).json(startIndexJob(owner, repo));
+  });
+
+  // F4: the saved hotspot report for a repo. 404 if it hasn't been analysed yet.
+  app.get("/api/repos/:owner/:repo/hotspots", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const history = await loadHistory(toRepoId(owner, repo));
+    if (!history) throw new AppError("This repo's history hasn't been analysed yet.", 404);
+    res.json(history.report);
+  });
+
+  // F4: analyse the repo's git history now ("Analyse history" button), then return the new report.
+  app.post("/api/repos/:owner/:repo/hotspots", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await analyzeHistory(owner, repo));
   });
 
   // The current indexing job, for the progress panel (polled every second).

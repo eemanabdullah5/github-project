@@ -77,3 +77,59 @@ export interface ChatMessage {
   content: string;
   sources?: Source[];
 }
+
+// ---------- F4: git history hotspots ----------
+
+// One commit, as we save it. The author is a scrambled code (hash), never a name or email.
+export interface CommitRecord {
+  sha: string;
+  author: string; // hash, only used to count how many different people changed something
+  date: string; // when the commit was made (ISO date)
+  fileCount: number; // how many files the commit changed
+  files: Array<{ path: string; added: number; deleted: number }>; // files that were only renamed/moved are left out
+}
+
+// One file's history and complexity.
+export interface HotspotFile {
+  path: string;
+  changes: number; // how many commits changed it
+  linesAdded: number;
+  linesDeleted: number;
+  authors: number; // how many different people changed it
+  lastChanged: string; // date of the latest change
+  lines: number; // how long the file is now
+  complexity: number; // number of decision points (if, for, while, case, catch, &&, ||, ?)
+  score: number; // 0-100: changes × complexity, scaled so the riskiest file is 100
+}
+
+// Two files that keep being changed in the same commit.
+export interface CoChangePair {
+  a: string;
+  b: string;
+  count: number; // how many commits changed both
+  percent: number; // count as a % of the changes to the less-changed file
+}
+
+// One top-level folder and how many people work on it. No names.
+export interface AreaStats {
+  area: string;
+  commits: number;
+  authors: number;
+  files: number;
+  singleContributor: boolean; // true if only 1 person changed it (with at least 3 commits)
+}
+
+// Everything the Hotspots tab shows.
+export interface HistoryReport {
+  repoId: string;
+  commitSha: string; // the version of the code the complexity was measured on (used for GitHub links)
+  generatedAt: string;
+  since: string; // start of the 12-month window
+  commitsAnalyzed: number;
+  skipped: { merges: number; bots: number; large: number }; // large = commits over 30 files, left out of "files that change together" only
+  reachedLimit: boolean; // true if there were more than MAX_COMMITS commits, so only the newest were used
+  filesChanged: number; // how many current files changed in total (the list below shows only the top 100)
+  files: HotspotFile[];
+  coChange: CoChangePair[];
+  areas: AreaStats[];
+}

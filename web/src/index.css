@@ -342,3 +342,181 @@ a {
   font-size: 0.9rem;
   text-align: left;
 }
+
+/* ---------- F4: tabs (Chat | Hotspots) ---------- */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0.5rem 0 0.75rem;
+}
+
+.tab {
+  background: none;
+  color: var(--muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.4rem 0.9rem;
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- F4: Hotspots tab ---------- */
+
+/* Bar colour: one blue for the single series. Checked for contrast and colour-blindness on both themes. */
+:root,
+[data-theme="light"] {
+  --chart-bar: #2a78d6;
+  --warn: #9a6700;
+}
+
+[data-theme="dark"] {
+  --chart-bar: #3987e5;
+  --warn: #d29922;
+}
+
+.hotspots h3 {
+  font-size: 1rem;
+  margin: 1.5rem 0 0.25rem;
+}
+
+.warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* Headline numbers */
+.stat-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.stat {
+  flex: 1;
+  min-width: 10rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+}
+
+.stat-value {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+/* Bar chart: file name | bar | score */
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 0.5rem;
+}
+
+.bar-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(8rem, 40%) 1fr;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 2px 0;
+  border-radius: 4px;
+}
+
+.bar-row:hover,
+.bar-row:focus-visible {
+  background: var(--bg-soft);
+  outline: none;
+}
+
+.bar-label {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* if a long path is cut, cut the start, so the file name stays visible */
+  text-align: left;
+}
+
+.bar-track {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.bar {
+  height: 14px;
+  background: var(--chart-bar);
+  border-radius: 0 4px 4px 0; /* square at the start, rounded at the end */
+}
+
+.bar-value {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tooltip: hidden until the row is hovered or focused */
+.bar-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  left: 40%;
+  top: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  white-space: nowrap;
+}
+
+.bar-row:hover .bar-tooltip,
+.bar-row:focus-visible .bar-tooltip {
+  display: block;
+}
+
+/* Tables */
+.table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.plain-list {
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.plain-list li + li {
+  margin-top: 0.25rem;
+}

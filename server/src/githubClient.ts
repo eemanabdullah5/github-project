@@ -146,3 +146,58 @@ export async function downloadZipball(owner: string, repo: string, sha: string):
   const res = await githubFetch(`/repos/${owner}/${repo}/zipball/${sha}`);
   return new Uint8Array(await res.arrayBuffer());
 }
+
+// ---------- F4: commit history ----------
+
+// One commit from GitHub's commit list: who made it, when, and whether it's a merge or a bot.
+export interface CommitSummary {
+  sha: string;
+  authorId: string; // GitHub username if known, otherwise the email or name from the commit
+  date: string;
+  isMerge: boolean; // merge commits have 2 parents; they repeat changes already counted
+  isBot: boolean; // e.g. dependabot
+}
+
+// F4: lists commits on a branch since a date, newest first, up to `max`.
+// GitHub gives 100 per page, so we keep asking for the next page until we have enough.
+// Note: this list does NOT say which files changed. getCommitFiles() does that, one commit at a time.
+export async function listCommits(owner: string, repo: string, branch: string, since: string, max: number): Promise<CommitSummary[]> {
+  const commits: CommitSummary[] = [];
+  for (let page = 1; commits.length < max; page++) {
+    const res = await githubFetch(
+      `/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(branch)}&since=${encodeURIComponent(since)}&per_page=${PER_PAGE}&page=${page}`,
+    );
+    // Only the fields we use from GitHub's reply.
+    const batch = (await res.json()) as Array<{
+      sha: string;
+      commit: { author: { name?: string; email?: string; date: string } | null };
+      author: { login: string; type?: string } | null;
+      parents: unknown[];
+    }>;
+    for (const c of batch) {
+      const login = c.author?.login ?? "";
+      const name = c.commit.author?.name ?? "";
+      commits.push({
+        sha: c.sha,
+        authorId: login || c.commit.author?.email || name || "unknown",
+        date: c.commit.author?.date ?? "",
+        isMerge: c.parents.length > 1,
+        isBot: c.author?.type === "Bot" || login.endsWith("[bot]") || name.endsWith("[bot]"),
+      });
+    }
+    if (batch.length < PER_PAGE) break; // a short page means it was the last one
+  }
+  return commits.slice(0, max);
+}
+
+// F4: asks GitHub which files one commit changed, how many lines were added and deleted in each,
+// and the file's status ("added", "modified", "removed", "renamed", …).
+export async function getCommitFiles(
+  owner: string,
+  repo: string,
+  sha: string,
+): Promise<Array<{ path: string; added: number; deleted: number; status: string }>> {
+  const res = await githubFetch(`/repos/${owner}/${repo}/commits/${sha}`);
+  const body = (await res.json()) as { files?: Array<{ filename: string; additions: number; deletions: number; status: string }> };
+  return (body.files ?? []).map((f) => ({ path: f.filename, added: f.additions, deleted: f.deletions, status: f.status }));
+}

@@ -42,7 +42,7 @@ Built in this order, because later features reuse earlier ones.
 | F1 | **Clickable sources**: each cited file opens on GitHub at the exact lines of the indexed commit | Claude Code | S | ✅ Done |
 | F2 | **Executive / Technical toggle**: short leader answers or detailed developer answers | PRD | S | ✅ Done |
 | F3 | **Suggested follow-up questions** after each answer | Claude Code | S | ✅ Done |
-| F4 | **Git history hotspots**: which files change most, how complex they are, which files change together, and which areas only one person works on | Opus + Claude Code | M | Planned |
+| F4 | **Git history hotspots**: which files change most, how complex they are, which files change together, and which areas only one person works on | Opus + Claude Code | M | ✅ Done |
 | F5 | **Repo health report**: one click gives a summary, tech stack, structure, dependencies, hotspots and risks, downloadable as Markdown | Claude Code + Opus | M | Planned |
 
 How each one works is written up under [Implementation notes](#implementation-notes) once it's built.
@@ -191,3 +191,45 @@ The choice applies to the next question, and the browser remembers it.
 **Trade-off:** one extra AI call per question, which adds about 1–2 seconds before the question box unlocks.
 
 **How to demo:** ask any question → when the answer finishes, click one of the "Ask next" buttons.
+
+### F4 — Git history hotspots ✅
+
+**What it does:** a **Hotspots** tab next to Chat. Clicking **Analyse history** reads the last 12 months of commits and shows:
+1. **Headline numbers:** commits analysed, files changed, areas with one contributor.
+2. **Top hotspots chart:** the 10 riskiest files. Risk score = how often a file changes × how complex it is, scaled so the riskiest file is 100. Hover a bar for details.
+3. **Table** of changed files: changes, complexity, lines, people, last changed, score. File names link to GitHub (reuses F1).
+4. **Files that change together:** pairs often changed in the same commit, which can mean a hidden dependency.
+5. **Knowledge risk:** how many people changed each top-level folder, with a ⚠ when only one person did. **No names are shown or stored.**
+
+**How it works:**
+1. `POST /api/repos/:owner/:repo/hotspots` runs `analyzeHistory()`:
+   - downloads the current code (same filters as indexing, so secrets are skipped and masked) to measure complexity
+   - lists the last 12 months of commits from the GitHub API (at most 500) and skips **merge commits** (they repeat changes already counted) and **bots** (like dependabot, which aren't people)
+   - asks GitHub which files each new commit changed, 5 requests at a time. Commits saved last time are reused, so a refresh only fetches new ones.
+2. `computeReport()` does the maths. It's a pure function (no network or disk), so it's easy to test:
+   - **Complexity** = number of decision points (`if`, `for`, `while`, `case`, `catch`, `&&`, `||`, `? :`). Docs and config files count as 0.
+   - **Score** = changes × complexity, scaled so the top file is 100.
+   - **Files that change together:** pairs changed together at least 3 times.
+   - **Knowledge risk:** people per top-level folder, flagged when 1 person made at least 3 commits.
+3. **Big commits (more than 30 files)** count for hotspots and people, but are left out of "files that change together", because one 46-file commit would create 1,035 fake pairs. Files that were only renamed, with no lines changed, don't count. (We first skipped big commits entirely, but in class-flow that threw away a real 46-file feature commit, so we changed the rule.)
+4. **People are hashed:** each author is stored as a 12-character scrambled code. It can count people but can't be turned back into a name.
+5. Results and commits are saved in `data/history/<owner>__<repo>.json`. `GET /api/repos/:owner/:repo/hotspots` returns the saved report.
+
+**Why a button and not part of indexing:** it works on already-indexed repos without re-indexing, and it only uses GitHub, so the Gemini rate limit can't affect it.
+
+**Tested on class-flow:** 7 seconds, 24 commits, 116 files changed. Top hotspot: `backend/app/schemas.py` (9 changes × complexity 14). Most frequent pair: `main.py` ⇄ `schemas.py`.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/gitHistory.ts](server/src/gitHistory.ts) | **New.** `analyzeHistory()`, `computeReport()`, `countComplexity()`, `loadHistory()` |
+| [server/src/githubClient.ts](server/src/githubClient.ts) | New `listCommits()` and `getCommitFiles()` |
+| [server/src/config.ts](server/src/config.ts) | Limits: 12 months, 500 commits, 30 files per commit for co-change, 3 joint changes, 5 parallel requests |
+| [server/src/types.ts](server/src/types.ts) | `CommitRecord`, `HotspotFile`, `CoChangePair`, `AreaStats`, `HistoryReport` |
+| [server/src/app.ts](server/src/app.ts) | `GET` and `POST /api/repos/:owner/:repo/hotspots` |
+| [server/tests/gitHistory.test.ts](server/tests/gitHistory.test.ts) | **New.** Tests for complexity, scoring, deleted files, co-change, knowledge risk without names, big commits, renames, merges and bots, reuse of saved commits, GitHub errors, and two analyses at once |
+| [web/src/components/Hotspots.tsx](web/src/components/Hotspots.tsx) | **New.** The tab: headline numbers, bar chart with hover tooltip, tables, lists |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | **Chat \| Hotspots** tabs |
+| [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | API calls and types. Tab, chart and table styles. The bar colour passed contrast and colour-blindness checks on both themes. |
+
+**How to demo:** open a repo with some history (class-flow) → **Hotspots** → **Analyse history** → walk through the chart, the pairs and knowledge risk.
