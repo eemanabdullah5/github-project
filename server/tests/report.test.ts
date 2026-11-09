@@ -6,9 +6,12 @@ import {
   factsSection,
   hotspotsSection,
   languageBreakdown,
+  architectureSection,
   mergeRoundRobin,
+  structureSection,
 } from "../src/report.js";
-import type { Chunk, HistoryReport, Manifest } from "../src/types.js";
+import { buildArchitecture } from "../src/architecture.js";
+import type { Chunk, HistoryReport, ImportGraph, Manifest } from "../src/types.js";
 
 // Small helpers to build test data.
 const chunk = (id: string, text = `code ${id}`): Chunk => ({
@@ -113,5 +116,68 @@ describe("buildReportPrompt", () => {
     expect(usedChunks.length).toBeGreaterThan(0);
     expect(usedChunks.length).toBeLessThan(5);
     expect(usedChunks[0].id).toBe("c1");
+  });
+});
+
+describe("structureSection (Phase 4 import graph)", () => {
+  const graph: ImportGraph = {
+    repoId: "o/r",
+    commitSha: "abc",
+    generatedAt: "2026-11-09T00:00:00Z",
+    files: ["agents.py", "demo.py", "tests/test_agents.py"],
+    edges: [
+      { from: "demo.py", to: "agents.py", line: 1 },
+      { from: "tests/test_agents.py", to: "agents.py", line: 2 },
+    ],
+    external: [{ name: "pytest", files: ["tests/test_agents.py"] }],
+    unresolved: [],
+    stats: { imports: 4, internal: 2, external: 1, builtin: 1, unresolved: 0 },
+  };
+
+  it("lists the most depended-on files, outside packages and files nothing imports", () => {
+    const text = structureSection(graph);
+    expect(text).toContain("## Code structure (from imports)");
+    expect(text).toContain("Read 3 code files with 2 import links between them. 100% of imports between repo files could be followed.");
+    expect(text).toContain("- `agents.py`: imported by 2 files");
+    expect(text).toContain("**Outside packages used:** `pytest` (1 file).");
+    expect(text).toContain("`demo.py`, `tests/test_agents.py`.");
+  });
+
+  it("explains when there is no graph, or no supported code files", () => {
+    expect(structureSection(null)).toContain("couldn't be built");
+    expect(structureSection({ ...graph, files: [], edges: [], external: [] })).toContain("No Python, JavaScript or TypeScript files");
+  });
+});
+
+describe("architectureSection (Phase 4 architecture map)", () => {
+  const graph: ImportGraph = {
+    repoId: "o/r",
+    commitSha: "abc",
+    generatedAt: "2026-11-09T00:00:00Z",
+    files: ["main.py", "app/a.py", "lib/b.py"],
+    edges: [
+      { from: "main.py", to: "app/a.py", line: 1 },
+      { from: "app/a.py", to: "lib/b.py", line: 1 },
+      { from: "lib/b.py", to: "app/a.py", line: 2 },
+    ],
+    external: [],
+    unresolved: [],
+    stats: { imports: 3, internal: 3, external: 0, builtin: 0, unresolved: 0 },
+  };
+
+  it("includes the diagram as a mermaid block and lists the cycles", () => {
+    const text = architectureSection(buildArchitecture(graph, null));
+    expect(text).toContain("## Architecture map");
+    expect(text).toContain("```mermaid\nflowchart LR");
+    expect(text).toContain("Red arrows are part of a cycle.");
+    expect(text).toContain("- Folders: `app` ⇄ `lib`");
+    expect(text).toContain("- Files: `app/a.py` ⇄ `lib/b.py`");
+  });
+
+  it("says when there are no cycles, and is empty when there's nothing to draw", () => {
+    const oneWay = { ...graph, edges: graph.edges.slice(0, 2) };
+    expect(architectureSection(buildArchitecture(oneWay, null))).toContain("No cycles");
+    expect(architectureSection(null)).toBe("");
+    expect(architectureSection(buildArchitecture({ ...graph, files: [], edges: [] }, null))).toBe("");
   });
 });

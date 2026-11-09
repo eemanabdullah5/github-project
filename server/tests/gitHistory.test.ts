@@ -27,7 +27,7 @@ vi.mock("../src/ingestion.js", () => ({
   extractSourceFiles: vi.fn(() => [{ path: "src/a.ts", text: "if (x) {}", language: "typescript" }]),
 }));
 
-const { analyzeHistory, computeReport, countComplexity, loadHistory } = await import("../src/gitHistory.js");
+const { analyzeHistory, computeReport, countComplexity, loadHistory, personIds } = await import("../src/gitHistory.js");
 const { getCommitFiles, listCommits } = await import("../src/githubClient.js");
 
 afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
@@ -124,9 +124,37 @@ describe("computeReport", () => {
   });
 });
 
+describe("personIds (who is the same person)", () => {
+  const c = (sha: string, login: string, name: string, email: string) => ({ sha, login, name, email });
+
+  it("counts one person committing from several computers once (made-up emails, same name)", () => {
+    const ids = personIds([
+      c("1", "eeman5", "Eeman Abdullah", "eeman5@gmail.com"),
+      c("2", "", "Eeman Abdullah", "eeman@192.168.1.9"),
+      c("3", "", "eeman  abdullah ", "eeman@192.168.1.5"), // same name, different spacing and case
+    ]);
+    expect(new Set(ids.values())).toEqual(new Set(["account:eeman5"]));
+  });
+
+  it("groups unlinked commits by name even when no account has that name", () => {
+    const ids = personIds([c("1", "", "Sam Lee", "sam@10.0.0.2"), c("2", "", "Sam Lee", "sam@10.0.0.3"), c("3", "", "Ana Ruiz", "ana@x.org")]);
+    expect(ids.get("1")).toBe(ids.get("2"));
+    expect(ids.get("1")).not.toBe(ids.get("3"));
+  });
+
+  it("keeps two accounts with the same name apart, and doesn't guess which one an unlinked commit belongs to", () => {
+    const ids = personIds([c("1", "alex-a", "Alex Kim", "a@x.org"), c("2", "alex-b", "Alex Kim", "b@y.org"), c("3", "", "Alex Kim", "alex@laptop")]);
+    expect(new Set([ids.get("1"), ids.get("2"), ids.get("3")]).size).toBe(3);
+  });
+
+  it("falls back to the email when there's no name", () => {
+    expect(personIds([c("1", "", "", "Bot@CI.local")]).get("1")).toBe("email:bot@ci.local");
+  });
+});
+
 describe("analyzeHistory", () => {
   // A fake entry from GitHub's commit list.
-  const summary = (sha: string, extra = {}) => ({ sha, authorId: "octo", date: "2026-06-01T00:00:00Z", isMerge: false, isBot: false, ...extra });
+  const summary = (sha: string, extra = {}) => ({ sha, login: "octo", name: "Octo Cat", email: "octo@example.com", date: "2026-06-01T00:00:00Z", isMerge: false, isBot: false, ...extra });
 
   beforeEach(() => {
     vi.mocked(listCommits).mockReset();
@@ -177,5 +205,25 @@ describe("analyzeHistory", () => {
     await expect(analyzeHistory("octo", "busy")).rejects.toMatchObject({ status: 409 });
     finish();
     await first;
+  });
+});
+
+describe("analyzeHistory: counting people", () => {
+  beforeEach(() => {
+    vi.mocked(listCommits).mockReset();
+    vi.mocked(getCommitFiles).mockReset();
+    vi.mocked(getCommitFiles).mockResolvedValue([{ path: "src/a.ts", added: 1, deleted: 0, status: "modified" }]);
+  });
+
+  it("counts one person with several made-up emails once, including commits saved by an earlier run", async () => {
+    const entry = (sha: string, login: string, email: string) => ({ sha, login, name: "Eeman Abdullah", email, date: "2026-06-01T00:00:00Z", isMerge: false, isBot: false });
+    vi.mocked(listCommits).mockResolvedValue([entry("p1", "eeman5", "eeman5@gmail.com"), entry("p2", "", "eeman@192.168.1.9")]);
+    await analyzeHistory("octo", "people");
+    // A later run adds a commit from another made-up email; the saved commits are counted the same way.
+    vi.mocked(listCommits).mockResolvedValue([entry("p3", "", "eeman@192.168.1.5"), entry("p1", "eeman5", "eeman5@gmail.com"), entry("p2", "", "eeman@192.168.1.9")]);
+    const report = await analyzeHistory("octo", "people");
+    expect(report.files.find((f) => f.path === "src/a.ts")?.authors).toBe(1);
+    expect(report.areas.find((a) => a.area === "src")).toMatchObject({ authors: 1, commits: 3, singleContributor: true });
+    expect(readFileSync(path.join(tempDir, "history", "octo__people.json"), "utf8")).not.toMatch(/eeman/i);
   });
 });

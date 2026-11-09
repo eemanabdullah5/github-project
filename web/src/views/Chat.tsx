@@ -6,21 +6,19 @@
 // F3: after each answer, 3 suggested follow-up questions appear as buttons.
 // F4: a "Hotspots" tab next to the chat shows what the git history says about the repo.
 // F5: a "Report" tab shows a one-page health report that can be downloaded.
+// Phase 4: an "Architecture" tab shows the module map built from the import graph.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
 import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import { getStatus, startIndex, streamChat, type AnswerDepth, type ChatMessage, type Repo, type StatusResponse } from "../api";
+import Architecture from "../components/Architecture";
 import HealthReport from "../components/HealthReport";
 import Hotspots from "../components/Hotspots";
 import IndexProgress from "../components/IndexProgress";
+import { CitationWarning, markdownComponents } from "../components/CitationLink";
 import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
-
-// F1: makes every link inside an answer open in a new tab, so the chat stays open.
-const markdownComponents = {
-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-};
 
 /** The 4 example questions shown before the first message (PRD FR-4.5). */
 const STARTER_QUESTIONS = [
@@ -59,7 +57,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const [error, setError] = useState("");
   const [reindexing, setReindexing] = useState(false);
   const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
-  const [tab, setTab] = useState<"chat" | "hotspots" | "report">("chat"); // F4/F5: which tab is showing
+  const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
   const bottomRef = useRef<HTMLDivElement>(null);
 
   /** Loads the index status and commit SHA for the header. */
@@ -182,6 +180,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
               [
                 ["chat", "Chat"],
                 ["hotspots", "Hotspots"],
+                ["architecture", "Architecture"],
                 ["report", "Report"],
               ] as const
             ).map(([key, label]) => (
@@ -209,6 +208,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
       )}
 
       {tab === "hotspots" && <Hotspots repo={repo} />}
+      {tab === "architecture" && <Architecture repo={repo} />}
       {tab === "report" && <HealthReport repo={repo} />}
 
       {/* Everything below is the Chat tab. */}
@@ -249,6 +249,8 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
                   ) : (
                     <p className="thinking">Thinking…</p>
                   )}
+                  {/* Verified citations: warn once the answer has finished if any citation points to code the AI wasn't shown. */}
+                  {finished && <CitationWarning markdown={m.content} sources={m.sources ?? []} />}
                   {/* Sources show once the answer has finished streaming. */}
                   {finished && m.sources && m.sources.length > 0 && (
                     <details className="sources">

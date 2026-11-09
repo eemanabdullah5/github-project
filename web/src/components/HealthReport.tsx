@@ -5,15 +5,25 @@ import { AlertCircle, Download, Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { generateReport, getReport, type HealthReport as Report, type Repo } from "../api";
+import { CitationWarning, markdownComponents } from "./CitationLink";
+import MermaidDiagram from "./MermaidDiagram";
 import { linkCitations, type LinkTarget } from "../sourceLinks";
 
 interface Props {
   repo: Repo;
 }
 
-// Makes every link in the report open in a new tab (same as in chat answers).
-const markdownComponents = {
-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+// Links open in a new tab (from CitationLink), and ```mermaid blocks (the architecture map) are drawn as diagrams.
+const reportComponents = {
+  ...markdownComponents,
+  code: ({ className, children, node: _node, ...rest }: React.HTMLAttributes<HTMLElement> & { node?: unknown }) =>
+    className?.includes("language-mermaid") ? (
+      <MermaidDiagram code={String(children).trim()} label="Architecture map: folders of code and the imports between them" />
+    ) : (
+      <code className={className} {...rest}>
+        {children}
+      </code>
+    ),
 };
 
 // Saves some text as a file in the user's Downloads folder.
@@ -103,6 +113,8 @@ export default function HealthReport({ repo }: Props) {
   // Citations become GitHub links at the commit the report describes (F1).
   const target: LinkTarget = { owner: repo.owner, name: repo.name, ref: report.commitSha };
   const linkedMarkdown = linkCitations(report.markdown, target, report.sources);
+  // The downloaded file can't show the ⚠ badge, so unverified citations are written out as "(⚠ unverified)".
+  const exportMarkdown = linkCitations(report.markdown, target, report.sources, { forExport: true });
   const generatedAt = new Date(report.generatedAt).toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
@@ -117,8 +129,8 @@ export default function HealthReport({ repo }: Props) {
       <div className="top-line report-toolbar">
         <p>Generated {generatedAt}</p>
         <div className="row">
-          {/* The downloaded file has the same clickable GitHub links. */}
-          <button className="secondary" onClick={() => downloadFile(`${repo.owner}-${repo.name}-health-report.md`, linkedMarkdown)}>
+          {/* The downloaded file has the same clickable GitHub links; unverified citations are marked in words. */}
+          <button className="secondary" onClick={() => downloadFile(`${repo.owner}-${repo.name}-health-report.md`, exportMarkdown)}>
             <Download size={14} aria-hidden="true" />
             Download .md
           </button>
@@ -136,8 +148,9 @@ export default function HealthReport({ repo }: Props) {
 
       {/* The report itself, rendered like a document (no raw HTML). */}
       <article className="report-page">
+        <CitationWarning markdown={report.markdown} sources={report.sources} />
         <div className="markdown">
-          <ReactMarkdown components={markdownComponents}>{linkedMarkdown}</ReactMarkdown>
+          <ReactMarkdown components={reportComponents}>{linkedMarkdown}</ReactMarkdown>
         </div>
       </article>
     </div>

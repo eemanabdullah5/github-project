@@ -65,6 +65,46 @@ function hashAuthor(id: string): string {
   return createHash("sha1").update(id.toLowerCase()).digest("hex").slice(0, 12);
 }
 
+/** The name on a commit, tidied for comparing: "  Eeman  Abdullah " → "eeman abdullah". */
+function normalName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Decides which commits were made by the same person, and returns an id per commit (sha → id).
+ * One person often commits under several emails: a laptop where git was never told the email
+ * makes one up from the computer's network address (e.g. "eeman@192.168.1.9"), and that address changes.
+ * GitHub can't link those emails to an account, so counting by email would turn one person into several.
+ * Rules, in order:
+ *  1. Linked to a GitHub account → that account.
+ *  2. Not linked, but the name matches exactly one linked account in this repo → that account.
+ *  3. Not linked → the name, so one person on several computers still counts once.
+ *  4. No name → the email.
+ * Two different accounts with the same name stay separate (that's two real people), and their name isn't
+ * used for rule 2 because it would be a guess. The ids are only ever stored scrambled (hashAuthor).
+ */
+export function personIds(commits: Array<{ sha: string; login: string; name: string; email: string }>): Map<string, string> {
+  const accountsByName = new Map<string, Set<string>>();
+  for (const c of commits) {
+    if (!c.login || !normalName(c.name)) continue;
+    const accounts = accountsByName.get(normalName(c.name)) ?? new Set<string>();
+    accounts.add(c.login.toLowerCase());
+    accountsByName.set(normalName(c.name), accounts);
+  }
+  const ids = new Map<string, string>();
+  for (const c of commits) {
+    const name = normalName(c.name);
+    const accounts = accountsByName.get(name);
+    let id: string;
+    if (c.login) id = `account:${c.login.toLowerCase()}`;
+    else if (name && accounts?.size === 1) id = `account:${[...accounts][0]}`;
+    else if (name) id = `name:${name}`;
+    else id = `email:${c.email.toLowerCase() || "unknown"}`;
+    ids.set(c.sha, id);
+  }
+  return ids;
+}
+
 // Counts the "decision points" in some code: places where the code can go different ways.
 // Counted: if, elif, for, foreach, while, case, catch, except, &&, ||, and the "? :" shortcut.
 // Not counted: "?." and "??" (safe-access shortcuts) and "x?: number" (optional types), which aren't decisions.
@@ -225,7 +265,7 @@ export async function analyzeHistory(owner: string, repo: string): Promise<Histo
           const changed = await getCommitFiles(owner, repo, c.sha);
           return {
             sha: c.sha,
-            author: hashAuthor(c.authorId), // scrambled, never the real name
+            author: "", // set below, once we know which commits belong to the same person
             date: c.date,
             fileCount: changed.length,
             // Files that were only renamed or moved (no lines changed) don't count as work on that file.
@@ -238,8 +278,12 @@ export async function analyzeHistory(owner: string, repo: string): Promise<Histo
       for (const r of records) known.set(r.sha, r);
     }
 
-    // 5. Work out the report and save it with the commits.
-    const commits = wanted.map((c) => known.get(c.sha)!);
+    // 5. Work out who is the same person (see personIds), for new and saved commits alike, so commits
+    //    saved by an older version are counted the same way. Stored scrambled, never the real name.
+    const people = personIds(wanted);
+    const commits = wanted.map((c) => ({ ...known.get(c.sha)!, author: hashAuthor(people.get(c.sha)!) }));
+
+    // 6. Work out the report and save it with the commits.
     const report = computeReport(commits, files, { repoId, commitSha, since, skipped: { merges, bots, large: 0 }, reachedLimit });
     await saveHistory(repoId, { commits, report });
     return report;

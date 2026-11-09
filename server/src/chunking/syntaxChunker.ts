@@ -23,8 +23,8 @@ const HEADER_ROOM = 200;
 const parsers = new Map<string, Promise<Parser>>();
 let initPromise: Promise<void> | null = null;
 
-/** Loads tree-sitter and the grammar for a language (only once), and returns a parser for it. */
-function getParser(language: string, spec: LanguageSpec): Promise<Parser> {
+/** Loads tree-sitter and the grammar for a language (only once), and returns a parser for it. Also used by importGraph.ts. */
+export function getParser(language: string, spec: LanguageSpec): Promise<Parser> {
   let parser = parsers.get(language);
   if (!parser) {
     parser = (async () => {

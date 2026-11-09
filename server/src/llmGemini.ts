@@ -16,9 +16,18 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
-/** How many times to try again when Gemini says "too many requests" (common on the free tier). */
+/** "Too many requests" (common on the free tier): wait 20 s, up to 3 times. */
 const RATE_LIMIT_RETRIES = 3;
 const RATE_LIMIT_WAIT_MS = 20_000;
+
+/** Temporary problems on Google's side (503 = overloaded). Usually gone within seconds: wait 1 s, 2 s, then 4 s. */
+const BUSY_STATUSES = new Set([500, 503, 504]);
+const BUSY_WAITS_MS = [1_000, 2_000, 4_000];
+
+/** How we wait between tries. A separate object so tests can skip the real waiting. */
+export const retryTiming = {
+  sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+};
 
 /** Turns Gemini failures into messages the user can act on. Never includes the API key. */
 export function toAppError(err: unknown, model: string): AppError {
@@ -34,6 +43,12 @@ export function toAppError(err: unknown, model: string): AppError {
   if (status === 429) {
     return new AppError("Gemini rate limit or quota reached. Wait a minute and try again.", 429);
   }
+  if (status === 503) {
+    return new AppError("Gemini is busy right now (Google's servers are overloaded). Please try again in a minute.", 503);
+  }
+  if (status !== undefined && BUSY_STATUSES.has(status)) {
+    return new AppError(`Gemini had a temporary problem (${status}). Please try again in a minute.`, 502);
+  }
   if (status === undefined && /fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(message)) {
     return new AppError("Couldn't reach the Gemini API. Check your internet connection and try again.", 502);
   }
@@ -41,17 +56,63 @@ export function toAppError(err: unknown, model: string): AppError {
 }
 
 /**
- * Runs one Gemini call. If Gemini says "too many requests", waits and tries again
- * a few times. Any other failure is converted with toAppError.
+ * Decides whether a failed Gemini call is worth trying again, and how long to wait first.
+ * Returns the wait in milliseconds, or null to give up. `attempt` counts retries already made (0 = none yet).
+ * Errors that won't fix themselves (bad key, wrong model, bad request) are never retried.
  */
-async function call<T>(model: string, fn: () => Promise<T>): Promise<T> {
+export function retryDelay(err: unknown, attempt: number): number | null {
+  const status = err instanceof ApiError ? err.status : undefined;
+  if (status === 429) return attempt < RATE_LIMIT_RETRIES ? RATE_LIMIT_WAIT_MS : null;
+  if (status !== undefined && BUSY_STATUSES.has(status)) return BUSY_WAITS_MS[attempt] ?? null;
+  return null;
+}
+
+/** Waits before the next try, with a note in the server terminal (the user doesn't see it). */
+async function waitBeforeRetry(err: unknown, wait: number, attempt: number): Promise<void> {
+  const status = err instanceof ApiError ? err.status : "?";
+  const reason = status === 429 ? "rate limit" : "busy";
+  const tries = status === 429 ? RATE_LIMIT_RETRIES : BUSY_WAITS_MS.length;
+  console.warn(`Gemini ${reason} (${status}), retrying in ${wait / 1000}s (${attempt + 1}/${tries})`);
+  await retryTiming.sleep(wait);
+}
+
+/**
+ * Runs one Gemini call. If it fails with a temporary error (rate limit or busy servers),
+ * waits and tries again (see retryDelay). Any other failure is converted with toAppError.
+ */
+export async function call<T>(model: string, fn: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const rateLimited = err instanceof ApiError && err.status === 429;
-      if (!rateLimited || attempt >= RATE_LIMIT_RETRIES) throw toAppError(err, model);
-      await new Promise((r) => setTimeout(r, RATE_LIMIT_WAIT_MS));
+      const wait = retryDelay(err, attempt);
+      if (wait === null) throw toAppError(err, model);
+      await waitBeforeRetry(err, wait, attempt);
+    }
+  }
+}
+
+/**
+ * Streams the text of an answer, with the same retries as call(), but only until the first piece
+ * of text has been sent. After that a retry would repeat the start of the answer on screen,
+ * so a failure is reported as an error instead.
+ */
+export async function* streamText(model: string, open: () => Promise<AsyncIterable<{ text?: string }>>): AsyncGenerator<string> {
+  for (let attempt = 0; ; attempt++) {
+    let sentText = false;
+    try {
+      const stream = await open();
+      for await (const part of stream) {
+        if (part.text) {
+          sentText = true;
+          yield part.text;
+        }
+      }
+      return;
+    } catch (err) {
+      const wait = sentText ? null : retryDelay(err, attempt);
+      if (wait === null) throw toAppError(err, model);
+      await waitBeforeRetry(err, wait, attempt);
     }
   }
 }
@@ -93,19 +154,10 @@ export const geminiProvider: LlmProvider = {
     return (res.embeddings ?? []).map((e) => e.values ?? []);
   },
 
-  /** Streams the answer piece by piece. */
+  /** Streams the answer piece by piece. Retries temporary errors until the first piece arrives (see streamText). */
   async *chatStream(model: string, messages: ChatTurn[]) {
     const ai = getClient();
     const { systemInstruction, contents } = toGeminiRequest(messages);
-    const stream = await call(model, () =>
-      ai.models.generateContentStream({ model, contents, config: { systemInstruction } }),
-    );
-    try {
-      for await (const part of stream) {
-        if (part.text) yield part.text;
-      }
-    } catch (err) {
-      throw toAppError(err, model);
-    }
+    yield* streamText(model, () => ai.models.generateContentStream({ model, contents, config: { systemInstruction } }));
   },
 };

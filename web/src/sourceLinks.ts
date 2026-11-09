@@ -1,7 +1,9 @@
-// F1 — Clickable sources.
-// This file makes links to code on GitHub.
-// When the AI cites a file like [src/app.py:L10-L16], we turn it into a link.
-// Clicking the link opens that file on GitHub with lines 10 to 16 highlighted.
+// F1 — Clickable sources, and Phase 2 — Verified citations.
+// This file makes links to code on GitHub and checks the AI's citations.
+// When the AI cites a file like [src/app.py:L10-L16], we check it against the code the AI was really given:
+//  - verified: the file was retrieved AND every cited line is inside a retrieved chunk → a GitHub link
+//  - unverified: anything else (made-up file, lines the AI never saw, impossible line numbers) → a ⚠ warning
+import { rewriteCitations } from "./citations";
 import type { Source } from "./api";
 
 // Which repo and which version of the code the links should open.
@@ -10,6 +12,11 @@ export interface LinkTarget {
   name: string; // e.g. "ai_agent_oop"
   ref: string; // the commit we indexed. Using it means the line numbers still match after new commits.
 }
+
+// Unverified citations are written as Markdown links to this address, so the chat and report
+// can draw them as a warning badge instead of a link (see components/CitationLink.tsx).
+export const UNVERIFIED_HREF = "#unverified-citation";
+export const UNVERIFIED_TITLE = "Not verified: the AI wasn't shown these lines, so this citation may be wrong.";
 
 // Generates the GitHub URL for some lines of a file.
 // Example: https://github.com/octo/hello/blob/abc123/src/app.py#L10-L16
@@ -27,37 +34,20 @@ export function sourceUrl(target: LinkTarget, source: Source): string {
   return githubLineUrl(target, source.path, source.startLine, source.endLine);
 }
 
-// Finds a citation group in the answer text: square brackets holding one or more "file:lines".
-// Matches:  [app.py:L10-L16]   [app.py:10-16]   [a.py:L1-L4, b.py:L7]
-// Skips text that is already a link, like [docs](https://...).
-const CITATION_GROUP = /\[([^\[\]\n]+?:L?\d+(?:-L?\d+)?(?:\s*,\s*[^\[\]\n]+?:L?\d+(?:-L?\d+)?)*)\](?!\()/g;
+// The checking itself (isCitationVerified, checkCitations, …) lives in citations.ts.
+export { checkCitations, isCitationVerified, type CitationCheck } from "./citations";
 
-// Splits one citation into its parts: file path, start line, and end line (if there is one).
-const ONE_CITATION = /^\s*(.+?):L?(\d+)(?:-L?(\d+))?\s*$/;
-
-// Turns every citation in the answer text into a clickable link.
-// It only links files that are in the answer's Sources list (the code the AI was really given).
-// If the AI cites a file that isn't there, the citation stays as plain text, so we never show a broken link.
-export function linkCitations(markdown: string, target: LinkTarget, sources: Source[]): string {
-  // The files the AI was really given for this answer.
-  const knownPaths = new Set(sources.map((s) => s.path));
-
-  // Look at each citation group in the text, one at a time.
-  return markdown.replace(CITATION_GROUP, (whole, inner: string) => {
-    // A group can hold several citations separated by commas. Handle each one.
-    const parts = inner.split(",").map((part) => {
-      const match = part.match(ONE_CITATION);
-      // Not a valid citation, or a file the AI wasn't given: keep it as plain text.
-      if (!match || !knownPaths.has(match[1])) return part.trim();
-      const [, path, start, end] = match;
-      // Always show it the same way, e.g. "app.py:L10-L16".
-      const label = `${path}:L${start}${end ? `-L${end}` : ""}`;
-      // Markdown link format: [text](address)
-      return `[${label}](${githubLineUrl(target, path, Number(start), Number(end ?? start))})`;
-    });
-
-    // If at least one citation became a link, join them back together.
-    // If none did, put back the original text unchanged.
-    return parts.some((p) => p.startsWith("[")) ? parts.join(", ") : whole;
+/**
+ * Turns every citation in the answer text into Markdown the page can show.
+ *  - verified → a GitHub link to those lines
+ *  - unverified → a link to UNVERIFIED_HREF, which the page draws as a ⚠ badge (never a broken link)
+ * With `forExport`, unverified citations become plain text with a written warning instead,
+ * because a downloaded .md file can't show the badge.
+ */
+export function linkCitations(markdown: string, target: LinkTarget, sources: Source[], options: { forExport?: boolean } = {}): string {
+  return rewriteCitations(markdown, sources, (c) => {
+    if (c.verified) return `[${c.label}](${githubLineUrl(target, c.path, c.start, c.end)})`;
+    if (options.forExport) return `${c.label} (⚠ unverified)`;
+    return `[${c.label}](${UNVERIFIED_HREF} "${UNVERIFIED_TITLE}")`;
   });
 }

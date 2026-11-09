@@ -4,10 +4,12 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { buildArchitecture } from "./architecture.js";
 import { ROOT_DIR } from "./config.js";
 import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { analyzeHistory, loadHistory } from "./gitHistory.js";
+import { getGraph, summarizeGraph } from "./importGraph.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import type { AnswerDepth } from "./prompts.js";
 import { answer, suggestFollowUps } from "./rag.js";
@@ -93,6 +95,24 @@ export function createApp() {
   app.post("/api/repos/:owner/:repo/report", async (req, res) => {
     const { owner, repo } = repoParams(req);
     res.json(await generateReport(toRepoId(owner, repo)));
+  });
+
+  // Phase 4: the import graph (which file imports which) for the indexed commit, plus a short summary.
+  // Built during indexing; for repos indexed before this feature it's built now (a few seconds).
+  app.get("/api/repos/:owner/:repo/graph", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const graph = await getGraph(owner, repo, toRepoId(owner, repo));
+    res.json({ ...graph, summary: summarizeGraph(graph) });
+  });
+
+  // Phase 4: the architecture map (modules, the imports between them, cycles, hotspot colours, Mermaid diagram).
+  // Built from the import graph; uses the F4 hotspots if the history has been analysed.
+  app.get("/api/repos/:owner/:repo/architecture", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const repoId = toRepoId(owner, repo);
+    const graph = await getGraph(owner, repo, repoId);
+    const history = (await loadHistory(repoId))?.report ?? null;
+    res.json(buildArchitecture(graph, history));
   });
 
   // The current indexing job, for the progress panel (polled every second).

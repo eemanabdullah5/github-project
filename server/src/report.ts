@@ -3,17 +3,21 @@
 //  - Facts (repo, commit, file count, languages): calculated directly, no AI.
 //  - Overview, tech stack, structure, dependencies, risks, onboarding: written by the AI from the indexed code.
 //  - Hotspots and knowledge risk: copied word for word from the F4 git history analysis, no AI.
+//  - Code structure and architecture map: from the import graph (Phase 4), no AI. The map is a Mermaid
+//    diagram, which the app draws and GitHub shows as a picture in the downloaded file.
 // The report is saved in data/reports/, so opening it again is instant. "Regenerate" makes a new one.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { buildArchitecture, type ArchitectureMap } from "./architecture.js";
 import { CHARS_PER_TOKEN, DATA_DIR, NUM_CTX } from "./config.js";
 import { AppError } from "./errors.js";
 import { loadHistory } from "./gitHistory.js";
+import { getGraph, summarizeGraph } from "./importGraph.js";
 import { detectLanguage } from "./ingestion.js";
 import { chat, embedQuery, type ChatTurn } from "./llm.js";
 import { reportPrompt } from "./prompts.js";
 import { formatChunk, toSources, truncateReadme, truncateTree } from "./rag.js";
-import type { Chunk, HistoryReport, Manifest, Source } from "./types.js";
+import type { Chunk, HistoryReport, ImportGraph, Manifest, Source } from "./types.js";
 import { loadManifest, query } from "./vectorStore.js";
 
 const REPORTS_DIR = path.join(DATA_DIR, "reports");
@@ -128,6 +132,65 @@ export function hotspotsSection(history: HistoryReport | null): string {
   return lines.join("\n");
 }
 
+// The "Code structure" section, from the import graph (no AI, so the numbers are exact).
+// If the graph couldn't be built, it says so instead of failing the whole report.
+export function structureSection(graph: ImportGraph | null): string {
+  const lines = ["## Code structure (from imports)", ""];
+  if (!graph) {
+    lines.push("_The import graph couldn't be built for this repo, so this section is missing. Try regenerating the report._");
+    return lines.join("\n");
+  }
+  if (graph.files.length === 0) {
+    lines.push("_No Python, JavaScript or TypeScript files, so there's no import graph yet (other languages come later)._");
+    return lines.join("\n");
+  }
+  const summary = summarizeGraph(graph, 5);
+  const coverage = summary.coverage === null ? "" : ` ${Math.round(summary.coverage * 100)}% of imports between repo files could be followed.`;
+  lines.push(`Read ${plural(graph.files.length, "code file")} with ${plural(graph.edges.length, "import link")} between them.${coverage}`, "");
+
+  if (summary.mostImported.length) {
+    lines.push("**Most depended-on files** (changing these affects the most other files):", "");
+    for (const f of summary.mostImported) lines.push(`- \`${f.path}\`: imported by ${plural(f.importedBy, "file")}`);
+    lines.push("");
+  }
+  if (graph.external.length) {
+    const shown = graph.external.slice(0, 10).map((p) => `\`${p.name}\` (${plural(p.files.length, "file")})`);
+    const more = graph.external.length > 10 ? `, and ${graph.external.length - 10} more` : "";
+    lines.push(`**Outside packages used:** ${shown.join(", ")}${more}.`, "");
+  }
+  if (summary.notImported.length) {
+    const shown = summary.notImported.slice(0, 5).map((f) => `\`${f}\``).join(", ");
+    const more = summary.notImported.length > 5 ? `, and ${summary.notImported.length - 5} more` : "";
+    lines.push(`**Not imported by any other file** (entry points, scripts, tests or unused code): ${shown}${more}.`);
+  }
+  return lines.join("\n").trimEnd();
+}
+
+// The "Architecture map" section: the module diagram as a Mermaid block, plus any cycles (no AI).
+// Empty when there's no graph or no supported code (structureSection already explains why).
+export function architectureSection(map: ArchitectureMap | null): string {
+  if (!map || map.modules.length === 0) return "";
+  const lines = [
+    "## Architecture map",
+    "",
+    "Each box is a folder of code. An arrow points from the folder that imports to the folder it uses; the number is how many imports it stands for." +
+      (map.hotspotsAnalysed ? " Darker orange boxes contain riskier files (from the hotspots)." : "") +
+      (map.cycles.length ? " Red arrows are part of a cycle." : ""),
+    "",
+    "```mermaid",
+    map.mermaid,
+    "```",
+  ];
+  if (map.cycles.length || map.fileCycles.length) {
+    lines.push("", "**Cycles** (code that depends on itself in a loop is harder to change and test):", "");
+    for (const group of map.cycles) lines.push(`- Folders: ${group.map((m) => `\`${m}\``).join(" ⇄ ")}`);
+    for (const group of map.fileCycles) lines.push(`- Files: ${group.map((f) => `\`${f}\``).join(" ⇄ ")}`);
+  } else {
+    lines.push("", "No cycles: dependencies between folders all go one way.");
+  }
+  return lines.join("\n");
+}
+
 // Merges the search results of all sections fairly: first every section's best chunk, then every
 // section's second best, and so on. Repeats are skipped. So if the list must be cut, each section keeps its best code.
 export function mergeRoundRobin(lists: Chunk[][]): Chunk[] {
@@ -203,13 +266,20 @@ export async function generateReport(repoId: string): Promise<HealthReport> {
 
     // 3. Put the report together: title, facts, the AI's sections, then the git history section.
     const history = (await loadHistory(repoId))?.report ?? null;
+    // Phase 4: the import graph (built during indexing, or now for repos indexed before this feature).
+    const [owner, name] = repoId.split("/");
+    const graph = await getGraph(owner, name, repoId).catch(() => null);
     const markdown = [
       `# Health report: ${manifest.repoId}`,
       `_Generated ${new Date().toISOString().slice(0, 10)} by the GitHub Repository AI Assistant._`,
       factsSection(manifest),
       aiSections,
+      structureSection(graph),
+      architectureSection(graph && buildArchitecture(graph, history)),
       hotspotsSection(history),
-    ].join("\n\n");
+    ]
+      .filter(Boolean) // the architecture section is empty when there's nothing to draw
+      .join("\n\n");
 
     // 4. Save it, so it opens instantly next time.
     const report: HealthReport = {

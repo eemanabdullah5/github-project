@@ -152,7 +152,9 @@ export async function downloadZipball(owner: string, repo: string, sha: string):
 // One commit from GitHub's commit list: who made it, when, and whether it's a merge or a bot.
 export interface CommitSummary {
   sha: string;
-  authorId: string; // GitHub username if known, otherwise the email or name from the commit
+  login: string; // GitHub username, or "" if the commit's email isn't linked to an account
+  name: string; // the author name written in the commit
+  email: string; // the author email written in the commit
   date: string;
   isMerge: boolean; // merge commits have 2 parents; they repeat changes already counted
   isBot: boolean; // e.g. dependabot
@@ -179,7 +181,9 @@ export async function listCommits(owner: string, repo: string, branch: string, s
       const name = c.commit.author?.name ?? "";
       commits.push({
         sha: c.sha,
-        authorId: login || c.commit.author?.email || name || "unknown",
+        login,
+        name,
+        email: c.commit.author?.email ?? "",
         date: c.commit.author?.date ?? "",
         isMerge: c.parents.length > 1,
         isBot: c.author?.type === "Bot" || login.endsWith("[bot]") || name.endsWith("[bot]"),

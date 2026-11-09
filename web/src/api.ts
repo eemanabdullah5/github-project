@@ -226,3 +226,41 @@ export async function streamChat(
     }
   }
 }
+
+// ---------- Phase 4: architecture map (same shape as ArchitectureMap in server/src/architecture.ts) ----------
+
+export interface ArchModule {
+  id: string;
+  name: string; // folder, e.g. "server/src/chunking", or "(root)"
+  files: string[];
+  uses: number; // other modules it imports from
+  usedBy: number; // other modules that import from it
+  hotspot: { score: number; file: string } | null; // riskiest file from F4, if analysed
+  inCycle: boolean;
+}
+
+export interface ArchLink {
+  from: string;
+  to: string;
+  count: number; // file-to-file imports behind this arrow
+  examples: Array<{ from: string; to: string; line: number }>;
+  inCycle: boolean;
+}
+
+export interface ArchitectureMap {
+  repoId: string;
+  commitSha: string;
+  depth: number;
+  modules: ArchModule[];
+  links: ArchLink[];
+  cycles: string[][];
+  fileCycles: string[][];
+  coverage: number | null;
+  hotspotsAnalysed: boolean;
+  mermaid: string;
+}
+
+// Phase 4: the architecture map. Built from the import graph (a few seconds the first time for older indexes).
+export function getArchitecture(owner: string, name: string): Promise<ArchitectureMap> {
+  return request(`${repoPath(owner, name)}/architecture`);
+}

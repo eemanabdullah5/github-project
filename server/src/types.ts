@@ -133,3 +133,45 @@ export interface HistoryReport {
   coChange: CoChangePair[];
   areas: AreaStats[];
 }
+
+// ---------- Phase 4: import graph ----------
+
+// One arrow in the import graph: file `from` imports file `to` (first seen on `line`).
+export interface ImportEdge {
+  from: string;
+  to: string;
+  line: number;
+}
+
+// An import that looked like a repo file but matched no file (e.g. a path alias we can't follow yet).
+export interface UnresolvedImport {
+  from: string;
+  specifier: string; // as written in the code, e.g. "@/utils" or ".missing"
+  line: number;
+}
+
+// Which file imports which, for the code files of one indexed commit. Saved in data/graphs/.
+export interface ImportGraph {
+  repoId: string;
+  commitSha: string; // the indexed commit the graph was built from
+  generatedAt: string;
+  files: string[]; // the code files that were read (Python, JavaScript, TypeScript)
+  edges: ImportEdge[]; // imports between repo files (one per pair of files)
+  external: Array<{ name: string; files: string[] }>; // outside packages and the files that use them, most used first
+  unresolved: UnresolvedImport[];
+  stats: {
+    imports: number; // every import statement target found
+    internal: number; // … that point to a repo file
+    external: number; // … to an outside package
+    builtin: number; // … to the language itself (os, fs…)
+    unresolved: number; // … that looked internal but matched no file
+  };
+}
+
+// Short facts from the graph, for the API and the health report.
+export interface GraphSummary {
+  coverage: number | null; // share of internal-looking imports matched to a file (null if there were none)
+  mostImported: Array<{ path: string; importedBy: number }>; // the files most other files depend on
+  notImported: string[]; // code files no other file imports: entry points, scripts, tests or unused code
+  folderLinks: Array<{ from: string; to: string; count: number }>; // imports between top-level folders
+}

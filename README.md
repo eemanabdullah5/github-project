@@ -154,6 +154,9 @@ server/src/
   llmGemini.ts      the only file that talks to Gemini
   llmOllama.ts      the only file that talks to Ollama
   vectorStore.ts    saves and searches chunks (LanceDB)
+  importGraph.ts    which file imports which (Phase 4), saved in data/graphs/
+  importResolvers.ts  per-language rules that match an import to a file
+  architecture.ts   the architecture map: modules, links, cycles, Mermaid diagram
   indexer.ts        the background indexing job
   rag.ts            builds the prompt and streams the answer
   prompts.ts        the text of every instruction sent to the AI
@@ -161,7 +164,7 @@ web/src/
   App.tsx           view switching and theme
   api.ts            calls to the server
   views/            RepoBrowser and Chat
-  components/       IndexProgress
+  components/       IndexProgress, Hotspots, HealthReport, Architecture, MermaidDiagram, CitationLink
 data/               local indexes (git-ignored)
 ```
 

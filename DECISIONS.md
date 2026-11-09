@@ -230,8 +230,9 @@ This file records **why** each decision was made, so nobody has to guess later. 
   - Each provider lives in its own file (`llmGemini.ts`, `llmOllama.ts`) behind `llm.ts`, so the rest of the app doesn't change.
 - **Consequences:**
   - **Privacy:** with Gemini, code chunks from indexed repos (including **private** repos) and questions are sent to Google. While Gemini is used, this breaks PRD FR-2.11, NFR-9 and acceptance criterion 22. **Needs senior approval before use with company code.**
-  - A Gemini API key (`GEMINI_API_KEY`) is needed. Free-tier rate limits can slow indexing of large repos; the app waits and retries.
+  - A Gemini API key (`GEMINI_API_KEY`) is needed. Free-tier rate limits can slow indexing of large repos; the app waits and retries. Temporary Google errors (500/503/504, "overloaded") are retried after 1 s, 2 s and 4 s, but only before the first word of an answer is shown, so text is never repeated.
   - Indexes built with one provider's embedding model show as **stale** under the other, so switching means re-indexing.
+- **Update 2026-11-09:** switched `.env` to `LLM_PROVIDER=ollama` (`qwen2.5-coder:3b` + `qwen3-embedding:0.6b`), so code stays on this machine. Measured on this laptop (no GPU): search found the right code about as often as Gemini, but answers took about 56 s instead of 10 s, and the 3B model wrote **no citations**, so F1 links and Verified citations showed nothing. Switched back to Gemini the same day for the demo.
 
 ---
 

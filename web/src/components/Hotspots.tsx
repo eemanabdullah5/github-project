@@ -275,7 +275,7 @@ export default function Hotspots({ repo }: Props) {
 }
 
 // One headline number with its label (and, optionally, which areas need attention).
-function Stat({ label, value, warn }: { label: string; value: number; warn?: string }) {
+export function Stat({ label, value, warn }: { label: string; value: number; warn?: string }) {
   return (
     <div className="card stat">
       <span className="stat-label">{label}</span>

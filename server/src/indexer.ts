@@ -5,6 +5,7 @@ import { chunkFile } from "./chunking/index.js";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
 import { downloadZipball, getLatestCommitSha, getRepo, toRepoId } from "./githubClient.js";
+import { buildImportGraph, saveGraph } from "./importGraph.js";
 import { checkRepoSize, extractSourceFiles } from "./ingestion.js";
 import { checkModels, embedDocuments } from "./llm.js";
 import type { IndexJob, IndexStatus, Manifest, SourceFile } from "./types.js";
@@ -96,6 +97,14 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
     readme: findReadme(files),
   };
   await saveIndex(current.repoId, chunks, vectors, manifest);
+
+  // 5. Phase 4: build the import graph from the same files (local parsing, no AI, a few seconds).
+  // A failure here must not fail the index: the graph is rebuilt the first time it's asked for.
+  try {
+    await saveGraph(await buildImportGraph(files, { repoId: current.repoId, commitSha: sha }));
+  } catch (err) {
+    console.error("Import graph failed:", err instanceof Error ? err.message : err);
+  }
   current.step = "ready";
 }
 
