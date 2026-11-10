@@ -98,8 +98,20 @@ export interface HotspotFile {
   authors: number; // how many different people changed it
   lastChanged: string; // date of the latest change
   lines: number; // how long the file is now
-  complexity: number; // number of decision points (if, for, while, case, catch, &&, ||, ?)
-  score: number; // 0-100: changes × complexity, scaled so the riskiest file is 100
+  complexity: number; // cognitive complexity of the most complex function (see complexity.ts)
+  // How complexity was measured: "syntax" = parsed with tree-sitter, "estimate" = counted decision words
+  // (no grammar for this language, or a syntax error), "none" = docs/config file. Missing in history saved
+  // before this was added (those used the old whole-file count).
+  complexityMethod?: FileComplexity["method"];
+  topFunction?: FileComplexity["topFunction"]; // the function behind `complexity`, if it was parsed
+  score: number; // 0-100: changes × complexity, scaled so the top hotspot is 100 (where to look first, not a measured bug risk)
+}
+
+// How complex one file is (complexity.ts).
+export interface FileComplexity {
+  complexity: number;
+  method: "syntax" | "estimate" | "none";
+  topFunction: { name: string; line: number; endLine: number; complexity: number } | null;
 }
 
 // Two files that keep being changed in the same commit.

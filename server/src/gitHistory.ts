@@ -1,6 +1,7 @@
 // F4 — Git history hotspots.
 // Reads the last 12 months of commits from the GitHub API (no git clone needed) and works out:
-//  - Hotspots: files that change often AND are complex. Bugs and slow delivery usually concentrate there.
+//  - Hotspots: files that change often AND are complex (most complex function, see complexity.ts).
+//    A ranking of where to look first, not a measured bug risk.
 //  - Co-change: pairs of files that keep being changed in the same commit (a hidden dependency).
 //  - Knowledge risk: top-level folders that only one person has changed.
 // People are stored only as scrambled codes (hashes), used to count them. No names or emails are saved.
@@ -16,19 +17,17 @@ import {
   MAX_FILES_PER_COMMIT,
   MIN_CO_CHANGES,
 } from "./config.js";
+import { estimateComplexity, measureComplexity } from "./complexity.js";
 import { AppError } from "./errors.js";
 import { downloadZipball, getCommitFiles, getLatestCommitSha, getRepo, listCommits, toRepoId } from "./githubClient.js";
 import { checkRepoSize, extractSourceFiles } from "./ingestion.js";
-import type { AreaStats, CoChangePair, CommitRecord, HistoryReport, HotspotFile, SourceFile } from "./types.js";
+import type { AreaStats, CoChangePair, CommitRecord, FileComplexity, HistoryReport, HotspotFile, SourceFile } from "./types.js";
 
 const HISTORY_DIR = path.join(DATA_DIR, "history");
 
 // How many files and file pairs the report lists at most.
 const MAX_REPORT_FILES = 100;
 const MAX_CO_CHANGE_PAIRS = 10;
-
-// Docs and config files: their "complexity" is not meaningful, so it counts as 0.
-const NON_CODE_LANGUAGES = new Set(["markdown", "rst", "text", "json", "yaml", "toml", "xml", "html", "css", "scss"]);
 
 // What we save on disk for each repo: the commits (reused next time) and the latest report.
 interface HistoryFile {
@@ -105,26 +104,20 @@ export function personIds(commits: Array<{ sha: string; login: string; name: str
   return ids;
 }
 
-// Counts the "decision points" in some code: places where the code can go different ways.
-// Counted: if, elif, for, foreach, while, case, catch, except, &&, ||, and the "? :" shortcut.
-// Not counted: "?." and "??" (safe-access shortcuts) and "x?: number" (optional types), which aren't decisions.
-// Not as exact as a real parser, but works for every language and is easy to explain.
-export function countComplexity(text: string): number {
-  const keywords = text.match(/\b(?:if|elif|for|foreach|while|case|catch|except)\b/g)?.length ?? 0;
-  const operators = text.match(/&&|\|\||(?<![?.])\?(?![.?:])/g)?.length ?? 0;
-  return keywords + operators;
-}
-
 // Works out the whole report from the commits and the current files.
 // It doesn't use the network or the disk, so it's easy to test.
 //  - Only files that still exist are scored (deleted files can't be hotspots).
 //  - Every commit counts for hotspots and people. Commits over MAX_FILES_PER_COMMIT files are
 //    left out of "files that change together" only, because one big commit creates hundreds of fake pairs.
-//  - score = changes × complexity, scaled so the riskiest file is 100.
+//  - complexity = the most complex function in the file (complexity.ts). `complexities` holds the parsed
+//    results from analyzeHistory; files missing from it (e.g. in tests) use the old decision-word estimate.
+//  - hotspot score = changes × complexity, scaled so the top hotspot is 100. It ranks where to look first;
+//    it isn't a measured bug risk (that would need bug-fix history, which isn't used yet).
 export function computeReport(
   commits: CommitRecord[],
   files: SourceFile[],
   meta: Pick<HistoryReport, "repoId" | "commitSha" | "since" | "skipped" | "reachedLimit">,
+  complexities: Map<string, FileComplexity> = new Map(),
 ): HistoryReport {
   const current = new Map(files.map((f) => [f.path, f])); // path → file, for quick lookups
   // Commits small enough to use for "files that change together" (step 3).
@@ -148,6 +141,7 @@ export function computeReport(
   // 2. Add size and complexity, then the score.
   const rows: HotspotFile[] = [...perFile].map(([filePath, e]) => {
     const file = current.get(filePath)!;
+    const measured = complexities.get(filePath) ?? estimateComplexity(file);
     return {
       path: filePath,
       changes: e.changes,
@@ -156,14 +150,16 @@ export function computeReport(
       authors: e.authors.size,
       lastChanged: e.last,
       lines: file.text.split("\n").length,
-      complexity: NON_CODE_LANGUAGES.has(file.language) ? 0 : countComplexity(file.text),
+      complexity: measured.complexity,
+      complexityMethod: measured.method,
+      topFunction: measured.topFunction,
       score: 0,
     };
   });
   // Scale so the top file is 100. (Math.max(1, …) avoids dividing by zero when every score is 0.)
   const maxRaw = Math.max(1, ...rows.map((r) => r.changes * r.complexity));
   for (const r of rows) r.score = Math.round((100 * r.changes * r.complexity) / maxRaw);
-  // Riskiest first. Ties: more changes first, then by name.
+  // Top hotspots first. Ties: more changes first, then by name.
   rows.sort((x, y) => y.score - x.score || y.changes - x.changes || x.path.localeCompare(y.path));
 
   // 3. Co-change: for every small commit, count each pair of files it changed together.
@@ -227,7 +223,7 @@ export function computeReport(
 
 // Runs the whole analysis for a repo and saves it. Called when the user clicks "Analyse history".
 // Steps: download the current code (for complexity) → list commits → fetch each new commit's files
-// → work out the report → save. Throws an AppError the user can read if GitHub fails (e.g. rate limit).
+// → measure complexity of the changed files → work out the report → save. Throws an AppError the user can read if GitHub fails (e.g. rate limit).
 export async function analyzeHistory(owner: string, repo: string): Promise<HistoryReport> {
   const repoId = toRepoId(owner, repo);
   if (running.has(repoId)) throw new AppError("This repo's history is already being analysed. Please wait.", 409);
@@ -283,8 +279,21 @@ export async function analyzeHistory(owner: string, repo: string): Promise<Histo
     const people = personIds(wanted);
     const commits = wanted.map((c) => ({ ...known.get(c.sha)!, author: hashAuthor(people.get(c.sha)!) }));
 
-    // 6. Work out the report and save it with the commits.
-    const report = computeReport(commits, files, { repoId, commitSha, since, skipped: { merges, bots, large: 0 }, reachedLimit });
+    // 6. Measure complexity (most complex function) for the files that changed. Parsing is done here,
+    //    not in computeReport, so computeReport stays simple and doesn't need tree-sitter.
+    const changedPaths = new Set(commits.flatMap((c) => c.files.map((f) => f.path)));
+    const complexities = new Map<string, FileComplexity>();
+    for (const file of files) {
+      if (changedPaths.has(file.path)) complexities.set(file.path, await measureComplexity(file));
+    }
+
+    // 7. Work out the report and save it with the commits.
+    const report = computeReport(
+      commits,
+      files,
+      { repoId, commitSha, since, skipped: { merges, bots, large: 0 }, reachedLimit },
+      complexities,
+    );
     await saveHistory(repoId, { commits, report });
     return report;
   } finally {

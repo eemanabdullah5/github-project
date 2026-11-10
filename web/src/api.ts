@@ -48,8 +48,11 @@ export interface HotspotFile {
   authors: number; // how many different people changed it
   lastChanged: string;
   lines: number;
-  complexity: number; // decision points (if, for, while, …)
-  score: number; // 0-100, riskiest file = 100
+  complexity: number; // cognitive complexity of the most complex function
+  // "syntax" = parsed, "estimate" = counted decision words, "none" = docs/config. Missing in older saved history.
+  complexityMethod?: "syntax" | "estimate" | "none";
+  topFunction?: { name: string; line: number; endLine: number; complexity: number } | null;
+  score: number; // hotspot score 0-100, top hotspot = 100
 }
 
 export interface HistoryReport {
@@ -235,7 +238,7 @@ export interface ArchModule {
   files: string[];
   uses: number; // other modules it imports from
   usedBy: number; // other modules that import from it
-  hotspot: { score: number; file: string } | null; // riskiest file from F4, if analysed
+  hotspot: { score: number; file: string } | null; // top hotspot file from F4, if analysed
   inCycle: boolean;
 }
 

@@ -96,17 +96,17 @@ export default function Architecture({ repo }: Props) {
           {map.hotspotsAnalysed ? (
             <>
               <li>
-                <span className="swatch heat1" /> low risk
+                <span className="swatch heat1" /> low hotspot score
               </li>
               <li>
-                <span className="swatch heat2" /> medium risk
+                <span className="swatch heat2" /> medium hotspot score
               </li>
               <li>
-                <span className="swatch heat3" /> highest risk (riskiest file in the folder, from Hotspots)
+                <span className="swatch heat3" /> high hotspot score (top hotspot in the folder, from Hotspots)
               </li>
             </>
           ) : (
-            <li className="muted">Run Analyse history in the Hotspots tab to colour risky folders.</li>
+            <li className="muted">Run Analyse history in the Hotspots tab to colour folders by hotspot score.</li>
           )}
           {map.cycles.length > 0 && (
             <li>
@@ -155,7 +155,7 @@ export default function Architecture({ repo }: Props) {
                 <th scope="col" className="num">Files</th>
                 <th scope="col" className="num">Uses</th>
                 <th scope="col" className="num">Used by</th>
-                <th scope="col">Riskiest file (hotspot score)</th>
+                <th scope="col">Top hotspot (score)</th>
               </tr>
             </thead>
             <tbody>

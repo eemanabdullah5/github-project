@@ -2,6 +2,7 @@
 // Makes a one-page Markdown report about a repo that a CTO could read or forward:
 //  - Facts (repo, commit, file count, languages): calculated directly, no AI.
 //  - Overview, tech stack, structure, dependencies, risks, onboarding: written by the AI from the indexed code.
+//    If the git history has been analysed, the AI also gets a short hotspot summary to use in the risks.
 //  - Hotspots and knowledge risk: copied word for word from the F4 git history analysis, no AI.
 //  - Code structure and architecture map: from the import graph (Phase 4), no AI. The map is a Mermaid
 //    diagram, which the app draws and GitHub shows as a picture in the downloaded file.
@@ -115,8 +116,11 @@ export function hotspotsSection(history: HistoryReport | null): string {
 
   const top = history.files.filter((f) => f.score > 0).slice(0, 5);
   if (top.length) {
-    lines.push("**Riskiest files** (changes × complexity, top file = 100):", "");
-    for (const f of top) lines.push(`- \`${f.path}\`: score ${f.score} (${plural(f.changes, "change")}, complexity ${f.complexity})`);
+    lines.push("**Top hotspots** (changes × complexity of the most complex function, top file = 100; where to look first, not a measured bug risk):", "");
+    for (const f of top) {
+      const where = f.topFunction ? `, in \`${f.topFunction.name}\`` : "";
+      lines.push(`- \`${f.path}\`: score ${f.score} (${plural(f.changes, "change")}, complexity ${f.complexity}${where})`);
+    }
     lines.push("");
   }
 
@@ -130,6 +134,37 @@ export function hotspotsSection(history: HistoryReport | null): string {
       : "**Knowledge risk:** no area depends on a single person.",
   );
   return lines.join("\n");
+}
+
+// A short git history summary for the AI, so "Risks and tech debt" can mention hotspots (a few hundred tokens).
+// Empty when the history hasn't been analysed or has no hotspots worth mentioning.
+export function historySummaryForAI(history: HistoryReport | null): string {
+  if (!history) return "";
+  const lines: string[] = [];
+
+  const top = history.files.filter((f) => f.score > 0).slice(0, 5);
+  if (top.length) {
+    lines.push("Files that change most, weighted by complexity (hotspot score 0-100, top = 100):");
+    for (const f of top) {
+      const where = f.topFunction ? ` (most complex function: ${f.topFunction.name})` : "";
+      lines.push(`- ${f.path}: score ${f.score}, ${plural(f.changes, "change")}, ${plural(f.authors, "author")}, complexity ${f.complexity}${where}`);
+    }
+  }
+
+  const pairs = history.coChange.slice(0, 3);
+  if (pairs.length) {
+    lines.push("Files that often change together:");
+    for (const p of pairs) lines.push(`- ${p.a} and ${p.b}: ${plural(p.count, "time")} (${p.percent}%)`);
+  }
+
+  const oneOwner = history.areas.filter((a) => a.singleContributor).map((a) => a.area);
+  if (oneOwner.length) lines.push(`Areas only one person has changed: ${oneOwner.join(", ")}`);
+
+  if (!lines.length) return "";
+  return (
+    `<<<REPO GIT HISTORY SUMMARY (${plural(history.commitsAnalyzed, "commit")}, last 12 months)>>>\n` +
+    `${lines.join("\n")}\n<<<END GIT HISTORY SUMMARY>>>`
+  );
 }
 
 // The "Code structure" section, from the import graph (no AI, so the numbers are exact).
@@ -174,7 +209,7 @@ export function architectureSection(map: ArchitectureMap | null): string {
     "## Architecture map",
     "",
     "Each box is a folder of code. An arrow points from the folder that imports to the folder it uses; the number is how many imports it stands for." +
-      (map.hotspotsAnalysed ? " Darker orange boxes contain riskier files (from the hotspots)." : "") +
+      (map.hotspotsAnalysed ? " Darker orange boxes contain files with higher hotspot scores (from the hotspots)." : "") +
       (map.cycles.length ? " Red arrows are part of a cycle." : ""),
     "",
     "```mermaid",
@@ -214,14 +249,22 @@ export function mergeRoundRobin(lists: Chunk[][]): Chunk[] {
 export function buildReportPrompt(
   manifest: Pick<Manifest, "repoId" | "fileTree" | "readme">,
   chunks: Chunk[],
+  history: HistoryReport | null = null,
 ): { messages: ChatTurn[]; usedChunks: Chunk[] } {
+  // F4 hotspots, if analysed. Counted in the budget below before the chunks.
+  const historyText = historySummaryForAI(history);
+
   // The report rules, with this report's section headings filled in. Prompt text: prompts.ts
-  const rules = reportPrompt(REPORT_SECTIONS.map((s) => s.heading));
+  const rules = reportPrompt(
+    REPORT_SECTIONS.map((s) => s.heading),
+    Boolean(historyText),
+  );
 
   const repoContext =
     `Repository: ${manifest.repoId}\n\n` +
     `<<<REPO FILE TREE>>>\n${truncateTree(manifest.fileTree)}\n<<<END FILE TREE>>>\n\n` +
-    `<<<REPO README>>>\n${truncateReadme(manifest.readme) || "(no README)"}\n<<<END README>>>`;
+    `<<<REPO README>>>\n${truncateReadme(manifest.readme) || "(no README)"}\n<<<END README>>>` +
+    (historyText ? `\n\nGit history summary:\n${historyText}` : "");
 
   // Keep adding chunks while they fit in the model's context window.
   const tokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
@@ -260,12 +303,13 @@ export async function generateReport(repoId: string): Promise<HealthReport> {
       lists.push(await query(repoId, await embedQuery(section.search), CHUNKS_PER_SECTION));
     }
 
-    // 2. One AI call writes all the AI sections at once.
-    const { messages, usedChunks } = buildReportPrompt(manifest, mergeRoundRobin(lists));
+    // 2. One AI call writes all the AI sections at once. It also gets the hotspot summary (if analysed),
+    //    so the risks section can mention files that change often.
+    const history = (await loadHistory(repoId))?.report ?? null;
+    const { messages, usedChunks } = buildReportPrompt(manifest, mergeRoundRobin(lists), history);
     const aiSections = (await chat(messages)).trim();
 
     // 3. Put the report together: title, facts, the AI's sections, then the git history section.
-    const history = (await loadHistory(repoId))?.report ?? null;
     // Phase 4: the import graph (built during indexing, or now for repos indexed before this feature).
     const [owner, name] = repoId.split("/");
     const graph = await getGraph(owner, name, repoId).catch(() => null);

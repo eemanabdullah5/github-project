@@ -27,7 +27,7 @@ vi.mock("../src/ingestion.js", () => ({
   extractSourceFiles: vi.fn(() => [{ path: "src/a.ts", text: "if (x) {}", language: "typescript" }]),
 }));
 
-const { analyzeHistory, computeReport, countComplexity, loadHistory, personIds } = await import("../src/gitHistory.js");
+const { analyzeHistory, computeReport, loadHistory, personIds } = await import("../src/gitHistory.js");
 const { getCommitFiles, listCommits } = await import("../src/githubClient.js");
 
 afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
@@ -49,21 +49,6 @@ const meta = {
   reachedLimit: false,
 };
 
-describe("countComplexity", () => {
-  it("counts decision points", () => {
-    expect(countComplexity("if (a && b) { for (x of y) {} } else if (c || d) {}")).toBe(5); // if, for, if, &&, ||
-    expect(countComplexity("const v = ok ? 1 : 2;")).toBe(1);
-  });
-
-  it("ignores ?. and ?? and optional types", () => {
-    expect(countComplexity("const a = b?.c ?? d; function f(x?: number) {}")).toBe(0);
-  });
-
-  it("doesn't count words that only contain a keyword", () => {
-    expect(countComplexity("const notify = format; caseStudy();")).toBe(0);
-  });
-});
-
 describe("computeReport", () => {
   const files = [
     file("src/billing.ts", "if (a) {}\nif (b) {}\nwhile (c) {}"), // complexity 3
@@ -83,7 +68,7 @@ describe("computeReport", () => {
   ];
   const report = computeReport(commits, files, meta);
 
-  it("scores files by changes × complexity, with the riskiest file at 100", () => {
+  it("scores files by changes × complexity, with the top hotspot at 100", () => {
     const billing = report.files.find((f) => f.path === "src/billing.ts")!;
     expect(billing).toMatchObject({ changes: 3, complexity: 3, authors: 2, linesAdded: 30, linesDeleted: 6, lines: 3, score: 100 });
     expect(billing.lastChanged).toBe("2026-09-01T00:00:00Z");

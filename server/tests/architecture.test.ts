@@ -85,7 +85,7 @@ describe("buildArchitecture", () => {
     expect(map.coverage).toBe(1);
   });
 
-  it("colours each module by its riskiest file, and only when the history was analysed", () => {
+  it("colours each module by its top hotspot, and only when the history was analysed", () => {
     const map = buildArchitecture(graph, history);
     expect(map.hotspotsAnalysed).toBe(true);
     expect(map.modules.find((m) => m.name === "app")?.hotspot).toEqual({ score: 100, file: "app/routes.py" });

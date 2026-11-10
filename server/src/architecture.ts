@@ -4,7 +4,7 @@
 //     diagram has at most MAX_MODULES boxes (e.g. "server/src/chunking", not just "server").
 //  2. Imports between files are added up into arrows between modules ("server/src → 12 → server/src/chunking").
 //  3. Cycles are found: modules (or files) that depend on each other in a loop, a common design problem.
-//  4. If the git history was analysed (F4), each module is coloured by its riskiest file's hotspot score.
+//  4. If the git history was analysed (F4), each module is coloured by its top hotspot's score.
 //  5. The result is also written as a Mermaid diagram, which the web app draws and GitHub shows in Markdown.
 import path from "node:path";
 import type { HistoryReport, ImportEdge, ImportGraph } from "./types.js";
@@ -22,7 +22,7 @@ export interface ArchModule {
   files: string[];
   uses: number; // how many other modules it imports from
   usedBy: number; // how many other modules import from it
-  hotspot: { score: number; file: string } | null; // its riskiest file from F4, if the history was analysed
+  hotspot: { score: number; file: string } | null; // its top hotspot file from F4, if the history was analysed
   inCycle: boolean;
 }
 
@@ -126,7 +126,7 @@ function mermaidText(text: string): string {
   return text.replace(/"/g, "#quot;").replace(/[<>]/g, "");
 }
 
-/** Hotspot colour band for a score: 3 = riskiest (score 67+), 2 = 34+, 1 = above 0, 0 = none. */
+/** Hotspot colour band for a score: 3 = top hotspots (score 67+), 2 = 34+, 1 = above 0, 0 = none. */
 export function heatLevel(score: number | undefined): 0 | 1 | 2 | 3 {
   if (!score) return 0;
   return score >= 67 ? 3 : score >= 34 ? 2 : 1;
@@ -142,7 +142,7 @@ export function toMermaid(modules: ArchModule[], links: ArchLink[]): string {
   }
   links.forEach((l) => lines.push(`  ${id.get(l.from)} -->|${l.count}| ${id.get(l.to)}`));
 
-  // Colours: oranges for hotspots (darker = riskier), dark text so they read in light and dark themes.
+  // Colours: oranges for hotspots (darker = higher hotspot score), dark text so they read in light and dark themes.
   lines.push("  classDef heat1 fill:#f5e6d6,stroke:#b4501c,color:#1c1915");
   lines.push("  classDef heat2 fill:#f0a274,stroke:#9e4617,color:#1c1915");
   lines.push("  classDef heat3 fill:#e07a3f,stroke:#7a3410,color:#1c1915,font-weight:bold");
@@ -180,7 +180,7 @@ export function buildArchitecture(graph: ImportGraph, history: HistoryReport | n
   cycles.forEach((group, i) => group.forEach((m) => groupOf.set(m, i)));
   for (const l of links) l.inCycle = groupOf.has(l.from) && groupOf.get(l.from) === groupOf.get(l.to);
 
-  // The riskiest file in each module, from F4.
+  // The top hotspot file in each module, from F4.
   const scores = new Map((history?.files ?? []).map((f) => [f.path, f.score]));
 
   const modules: ArchModule[] = moduleNames.map((name, i) => {

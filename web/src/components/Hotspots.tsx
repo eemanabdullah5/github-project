@@ -1,6 +1,6 @@
 // F4 — Hotspots tab.
 // Shows what the git history says about a repo (last 12 months):
-//  1. headline numbers   2. chart of the 10 riskiest files   3. full table
+//  1. headline numbers   2. chart of the 10 top hotspots   3. full table
 //  4. files that change together   5. folders only one person works on
 // The analysis runs when the user clicks "Analyse history" (it only uses GitHub, not the AI).
 import { AlertCircle, RefreshCw } from "lucide-react";
@@ -38,6 +38,16 @@ function shortPath(path: string, max = 36): string {
 // Link to a whole file on GitHub (line 1), at the version that was measured. Reuses F1.
 function fileUrl(target: LinkTarget, path: string): string {
   return githubLineUrl(target, path, 1, 1).replace(/#L1$/, "");
+}
+
+// The complexity number, with "≈" in front when it was estimated (no parser for that language, or a syntax error).
+function complexityText(f: HotspotFile): string {
+  return f.complexityMethod === "estimate" ? `≈${f.complexity}` : String(f.complexity);
+}
+
+// "most complex: registerRoutes (31)", or "" when there's no parsed function.
+function topFunctionText(f: HotspotFile): string {
+  return f.topFunction ? `most complex: ${f.topFunction.name} (${f.topFunction.complexity})` : "";
 }
 
 export default function Hotspots({ repo }: Props) {
@@ -88,10 +98,10 @@ export default function Hotspots({ repo }: Props) {
     return (
       <div className="tab-page intro">
         <section className="panel intro-panel">
-          <h2>Find the risky parts of the codebase</h2>
+          <h2>Find where the codebase needs attention</h2>
           <p className="lede">
-            <strong>Hotspots</strong> show which files change most often and are most complex: that's usually where bugs and
-            slow delivery come from. They also show files that change together, and areas only one person works on.
+            <strong>Hotspots</strong> show which files change most often and are most complex: these are good places to
+            start reviews, refactoring and extra tests. They also show files that change together, and areas only one person works on.
           </p>
           <p className="muted small">Reads the last 12 months of commits from GitHub. No code is sent to the AI.</p>
           <div className="row">
@@ -113,6 +123,8 @@ export default function Hotspots({ repo }: Props) {
   const target: LinkTarget = { owner: repo.owner, name: repo.name, ref: report.commitSha };
   const chartFiles = report.files.filter((f) => f.score > 0).slice(0, CHART_FILES);
   const riskyAreas = report.areas.filter((a) => a.singleContributor);
+  // History saved before per-function complexity was added: no complexityMethod on any file.
+  const oldComplexity = report.files.length > 0 && report.files.every((f) => f.complexityMethod === undefined);
 
   return (
     <div className="tab-page">
@@ -141,12 +153,22 @@ export default function Hotspots({ repo }: Props) {
         <p className="muted small">Only {report.commitsAnalyzed} commits: results get more meaningful with more history.</p>
       )}
 
-      {/* 2. Chart of the riskiest files */}
+      {/* 2. Chart of the top hotspots */}
       {chartFiles.length > 0 && (
         <section className="panel chart-card" aria-labelledby="hs-top">
           <div className="section-head">
             <h2 id="hs-top">Top hotspots</h2>
-            <p>Risk score = how often a file changes × how complex it is. The riskiest file is 100.</p>
+            <p>Hotspot score = how often a file changes × how complex it is. The top hotspot is 100. It shows where to look first, not a measured bug risk.</p>
+            <p className="muted small">
+              Complexity = the cognitive complexity of the file's most complex function: each if, loop, catch or "? :" adds 1,
+              plus 1 more for each level it's nested. ≈ means estimated (no parser for that language).
+            </p>
+            {oldComplexity && (
+              <p className="muted small" role="note">
+                These scores were measured the old way (decision words across the whole file). Click Refresh to measure each
+                function.
+              </p>
+            )}
           </div>
           <HotspotChart files={chartFiles} target={target} />
         </section>
@@ -165,6 +187,7 @@ export default function Hotspots({ repo }: Props) {
                   <th scope="col">File</th>
                   <th scope="col" className="num">Changes</th>
                   <th scope="col" className="num">Complexity</th>
+                  <th scope="col">Most complex function</th>
                   <th scope="col" className="num">Lines</th>
                   <th scope="col" className="num">People</th>
                   <th scope="col" className="num">Last changed</th>
@@ -180,7 +203,22 @@ export default function Hotspots({ repo }: Props) {
                       </a>
                     </td>
                     <td className="num">{f.changes}</td>
-                    <td className="num">{f.complexity}</td>
+                    <td className="num" title={f.complexityMethod === "estimate" ? "Estimated: no parser for this language" : undefined}>
+                      {complexityText(f)}
+                    </td>
+                    <td>
+                      {f.topFunction ? (
+                        <a
+                          href={githubLineUrl(target, f.path, f.topFunction.line, f.topFunction.endLine)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <code>{f.topFunction.name}</code>
+                        </a>
+                      ) : (
+                        <span className="muted">–</span>
+                      )}
+                    </td>
                     <td className="num">{f.lines}</td>
                     <td className="num">{f.authors}</td>
                     <td className="num nowrap">{shortDate(f.lastChanged)}</td>
@@ -287,12 +325,12 @@ export function Stat({ label, value, warn }: { label: string; value: number; war
   );
 }
 
-// Horizontal bar chart: one bar per file, length = risk score (0–100), in the single accent colour.
+// Horizontal bar chart: one bar per file, length = hotspot score (0–100), in the single accent colour.
 // Hover a row, or tab to its file link, to see the details in a tooltip.
 function HotspotChart({ files, target }: { files: HotspotFile[]; target: LinkTarget }) {
   return (
     <>
-      <ul className="bar-chart" aria-label="Top hotspots by risk score" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      <ul className="bar-chart" aria-label="Top hotspots by hotspot score" style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {files.map((f) => (
           <li key={f.path} className="bar-row">
             <a
@@ -301,7 +339,7 @@ function HotspotChart({ files, target }: { files: HotspotFile[]; target: LinkTar
               target="_blank"
               rel="noopener noreferrer"
               title={f.path}
-              aria-label={`${f.path}: score ${f.score}, ${f.changes} changes, complexity ${f.complexity}`}
+              aria-label={`${f.path}: score ${f.score}, ${f.changes} changes, complexity ${complexityText(f)}${f.topFunction ? `, ${topFunctionText(f)}` : ""}`}
             >
               {shortPath(f.path)}
             </a>
@@ -313,8 +351,9 @@ function HotspotChart({ files, target }: { files: HotspotFile[]; target: LinkTar
             <div className="bar-tooltip" role="tooltip">
               <strong>{f.path}</strong>
               <span>
-                {f.changes} changes · complexity {f.complexity} · {f.lines} lines
+                {f.changes} changes · complexity {complexityText(f)} · {f.lines} lines
               </span>
+              {f.topFunction && <span className="tip-muted">{topFunctionText(f)}</span>}
               <span className="tip-muted">
                 {f.authors} {f.authors === 1 ? "person" : "people"} · last changed {shortDate(f.lastChanged)}
               </span>

@@ -109,6 +109,31 @@ describe("buildReportPrompt", () => {
     expect(usedChunks.map((c) => c.id)).toEqual(["x", "y"]);
   });
 
+  it("leaves out the git history rule and block when history hasn't been analysed", () => {
+    const system = buildReportPrompt(manifest, [chunk("x")], null).messages[0].content;
+    expect(system).not.toContain("GIT HISTORY SUMMARY");
+    expect(system).not.toContain("Git history summary");
+  });
+
+  it("gives the AI a short hotspot summary and a rule to use it in the risks", () => {
+    const history = {
+      commitsAnalyzed: 24,
+      files: [
+        { path: "src/app.ts", score: 100, changes: 9, authors: 1, complexity: 14 },
+        { path: "README.md", score: 0, changes: 5, authors: 2, complexity: 0 }, // score 0: left out
+      ],
+      coChange: [{ a: "src/app.ts", b: "src/db.ts", count: 6, percent: 75 }],
+      areas: [{ area: "server", singleContributor: true }],
+    } as unknown as HistoryReport;
+    const system = buildReportPrompt(manifest, [chunk("x")], history).messages[0].content;
+    expect(system).toContain("<<<REPO GIT HISTORY SUMMARY (24 commits, last 12 months)>>>");
+    expect(system).toContain("- src/app.ts: score 100, 9 changes, 1 author, complexity 14");
+    expect(system).not.toContain("README.md: score");
+    expect(system).toContain("- src/app.ts and src/db.ts: 6 times (75%)");
+    expect(system).toContain("Areas only one person has changed: server");
+    expect(system).toContain('In "Risks and tech debt", mention');
+  });
+
   it("drops chunks that don't fit, keeping the first ones", () => {
     const big = "x".repeat(4000 * 4); // about 4,000 tokens each
     const chunks = ["c1", "c2", "c3", "c4", "c5"].map((id) => chunk(id, big));
