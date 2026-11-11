@@ -60,6 +60,7 @@ export interface IndexJob {
   step: IndexStep;
   done: number;
   total: number;
+  reused?: number; // embedding step: chunks that kept their saved vector (unchanged since the last index)
   error: string | null;
   startedAt: string; // ISO date
 }

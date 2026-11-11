@@ -36,6 +36,7 @@ export interface IndexJob {
   step: "downloading" | "processing" | "embedding" | "ready" | "failed";
   done: number;
   total: number;
+  reused?: number; // embedding: unchanged chunks that kept their saved vector (re-index)
   error: string | null;
   startedAt: string;
 }

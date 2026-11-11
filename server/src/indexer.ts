@@ -1,6 +1,7 @@
 // Indexer (ARCHITECTURE §4.1, §8.3): runs the background job that turns a repo into a searchable index.
 // Steps: Download the zip → Process (pick files and cut them into chunks) → Embed (turn
 // chunks into vectors) → Save. Only one job runs at a time. The UI polls getJob() for progress.
+// Re-index only embeds chunks that changed; unchanged ones keep their saved vectors (reuseEmbeddings.ts).
 import { chunkFile } from "./chunking/index.js";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
@@ -9,8 +10,9 @@ import { saveDependencies, scanDependencies } from "./dependencies.js";
 import { buildImportGraph, saveGraph } from "./importGraph.js";
 import { checkRepoSize, extractSourceFiles } from "./ingestion.js";
 import { checkModels, embedDocuments } from "./llm.js";
+import { planEmbedding } from "./reuseEmbeddings.js";
 import type { IndexJob, IndexStatus, Manifest, SourceFile } from "./types.js";
-import { loadManifest, saveIndex } from "./vectorStore.js";
+import { loadManifest, loadSavedVectors, saveIndex } from "./vectorStore.js";
 
 /** The current (or last finished) job. Lives in memory only, so a server restart forgets it. */
 let job: IndexJob | null = null;
@@ -76,14 +78,18 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
   }
   if (chunks.length === 0) throw new AppError("No readable source files were found in this repo.", 400);
 
-  // 3. Embed: turn every chunk into a vector.
+  // 3. Embed: turn each new or changed chunk into a vector. Unchanged chunks reuse their saved vector.
   current.step = "embedding";
+  const plan = planEmbedding(chunks, await savedVectorsFor(current.repoId));
   current.done = 0;
-  current.total = chunks.length;
-  const vectors = await embedDocuments(
-    chunks.map((c) => c.text),
+  current.total = plan.toEmbed.length; // the progress bar counts only the chunks that need the AI
+  current.reused = plan.reused;
+  const fresh = await embedDocuments(
+    plan.toEmbed.map((c) => c.text),
     (done) => (current.done = done),
   );
+  const vectors = plan.combine(fresh);
+  console.log(`Indexed ${current.repoId}: embedded ${fresh.length} of ${chunks.length} chunks, reused ${plan.reused}.`);
 
   // 4. Save the table, then the manifest last.
   const manifest: Manifest = {
@@ -115,6 +121,23 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
     console.error("Dependency scan failed:", err instanceof Error ? err.message : err);
   }
   current.step = "ready";
+}
+
+/**
+ * The previous index's vectors, so unchanged chunks don't have to be embedded again.
+ * Empty (embed everything) if there's no previous index, or it was made with a different embedding model.
+ * Why the model check: vectors from two models can't be mixed, they don't mean the same thing.
+ * If reading them fails, it embeds everything instead of failing the index.
+ */
+async function savedVectorsFor(repoId: string): Promise<Map<string, number[]>> {
+  const previous = await loadManifest(repoId);
+  if (!previous || previous.embedModel !== config.embedModel) return new Map();
+  try {
+    return await loadSavedVectors(repoId);
+  } catch (err) {
+    console.error("Couldn't read the saved vectors, embedding everything:", err instanceof Error ? err.message : err);
+    return new Map();
+  }
 }
 
 /** Finds the README in the repo's top folder (any extension), or returns "" if there isn't one. */

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { fingerprint } from "../src/reuseEmbeddings.js";
 import type { Chunk, Manifest } from "../src/types.js";
 
 const tempDir = mkdtempSync(path.join(tmpdir(), "vs-test-"));
@@ -10,7 +11,7 @@ vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
   DATA_DIR: tempDir,
 }));
-const { deleteIndex, keywordQuery, loadManifest, query, saveIndex, tableName } = await import("../src/vectorStore.js");
+const { deleteIndex, keywordQuery, loadManifest, loadSavedVectors, query, saveIndex, tableName } = await import("../src/vectorStore.js");
 
 afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
 
@@ -57,6 +58,16 @@ describe("vectorStore", () => {
     const results = await keywordQuery("octo/kw", "formatChunk", 5, "starts_with(path, 'web/')");
     expect(results.map((r) => r.id)).toEqual(["b"]);
     expect(results[0]).toEqual(chunks[1]); // no score fields leak out
+  });
+
+  it("reads the saved vectors by text fingerprint, for incremental re-index", async () => {
+    await saveIndex("octo/reuse", chunks, vectors, manifest);
+    const saved = await loadSavedVectors("octo/reuse");
+    expect(saved.size).toBe(3);
+    const vector = saved.get(fingerprint(chunks[1].text))!;
+    expect(vector[0]).toBeCloseTo(0);
+    expect(vector[1]).toBeCloseTo(1);
+    expect(await loadSavedVectors("octo/never-indexed")).toEqual(new Map());
   });
 
   it("builds the keyword index on first use for tables made before hybrid search", async () => {

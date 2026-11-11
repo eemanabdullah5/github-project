@@ -731,6 +731,11 @@ button.repo:disabled {
   color: var(--accent-text);
 }
 
+/* Re-index: "331 unchanged chunks reused · embedding only the 12 new or changed". */
+.reuse-note {
+  margin: 0 0 8px;
+}
+
 .progress-row {
   display: flex;
   align-items: center;

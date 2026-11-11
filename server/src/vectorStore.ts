@@ -14,6 +14,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as lancedb from "@lancedb/lancedb";
 import { DATA_DIR } from "./config.js";
+import { fingerprint } from "./reuseEmbeddings.js";
 import type { Chunk, Manifest } from "./types.js";
 
 const DB_DIR = path.join(DATA_DIR, "lancedb");
@@ -68,6 +69,19 @@ export async function saveIndex(repoId: string, chunks: Chunk[], vectors: number
 
   await mkdir(MANIFEST_DIR, { recursive: true });
   await writeFile(manifestPath(repoId), JSON.stringify(manifest, null, 2));
+}
+
+/**
+ * The repo's saved vectors, by text fingerprint (for incremental re-index, see reuseEmbeddings.ts).
+ * Empty if the repo has no index yet. Why read the text, not a stored fingerprint: indexes made before
+ * this feature have the text too, so they can be reused without re-indexing everything once.
+ */
+export async function loadSavedVectors(repoId: string): Promise<Map<string, number[]>> {
+  const db = await openDb();
+  if (!(await db.tableNames()).includes(tableName(repoId))) return new Map();
+  const table = await db.openTable(tableName(repoId));
+  const rows = await table.query().select(["text", "vector"]).toArray();
+  return new Map(rows.map((r) => [fingerprint(r.text as string), Array.from(r.vector as Iterable<number>)]));
 }
 
 /** Turns a database row into a plain chunk (drops the vector and the score). Used by both searches. */
