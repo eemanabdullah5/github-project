@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { buildArchitecture } from "./architecture.js";
+import { focusGraph, getCallGraph, listFunctions } from "./callGraph.js";
 import {
   appendExchange,
   deleteConversation,
@@ -125,6 +126,24 @@ export function createApp() {
   app.get("/api/repos/:owner/:repo/dependencies", async (req, res) => {
     const { owner, repo } = repoParams(req);
     res.json(await getDependencies(owner, repo, toRepoId(owner, repo)));
+  });
+
+  // Call graph: every function with how many call it and how many it calls, most-called first (for the picker).
+  // Built at indexing; for repos indexed before the call graph, it's built now (a few seconds).
+  app.get("/api/repos/:owner/:repo/calls", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const graph = await getCallGraph(owner, repo, toRepoId(owner, repo));
+    res.json({ commitSha: graph.commitSha, stats: graph.stats, functions: listFunctions(graph) });
+  });
+
+  // Call graph focus: one function's callers and callees. ?fn=<function id>&depth=1|2
+  app.get("/api/repos/:owner/:repo/calls/focus", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const fn = typeof req.query.fn === "string" ? req.query.fn : "";
+    if (!fn) throw new AppError("Pick a function.", 400);
+    const depth = req.query.depth === "2" ? 2 : 1;
+    const graph = await getCallGraph(owner, repo, toRepoId(owner, repo));
+    res.json({ commitSha: graph.commitSha, ...focusGraph(graph, fn, depth) });
   });
 
   // Phase 4: the architecture map (modules, the imports between them, cycles, hotspot colours, Mermaid diagram).

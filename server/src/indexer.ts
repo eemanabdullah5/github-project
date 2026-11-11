@@ -2,6 +2,7 @@
 // Steps: Download the zip → Process (pick files and cut them into chunks) → Embed (turn
 // chunks into vectors) → Save. Only one job runs at a time. The UI polls getJob() for progress.
 // Re-index only embeds chunks that changed; unchanged ones keep their saved vectors (reuseEmbeddings.ts).
+import { buildCallGraph, saveCallGraph } from "./callGraph.js";
 import { chunkFile } from "./chunking/index.js";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
@@ -119,6 +120,14 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
     await saveDependencies(scanDependencies(files, { repoId: current.repoId, commitSha: sha }));
   } catch (err) {
     console.error("Dependency scan failed:", err instanceof Error ? err.message : err);
+  }
+
+  // 7. Call graph: which function calls which (local parsing, no AI, a few seconds).
+  // Same rule: a failure must not fail the index, it's rebuilt the first time it's asked for.
+  try {
+    await saveCallGraph(await buildCallGraph(files, { repoId: current.repoId, commitSha: sha }));
+  } catch (err) {
+    console.error("Call graph failed:", err instanceof Error ? err.message : err);
   }
   current.step = "ready";
 }

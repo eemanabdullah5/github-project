@@ -11,13 +11,22 @@
 //  - dropped:  everything else (library and built-in calls like console.log or list.append).
 // Python, JavaScript and TypeScript, like the import graph.
 //
-// Phase 1 (this file so far): build the graph in memory from a repo's files.
-// Later phases: save it at indexing, the Calls tab with its diagram, and the chat and report hooks.
+// Phase 1: build the graph in memory from a repo's files.
+// Phase 2: save it (data/callgraphs/<owner>__<repo>.json, built at indexing or on first use), and the data the
+//          API returns: the function list and one function's callers and callees.
+// Later phases: the Calls tab with its diagram, and the chat and report hooks.
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { Node } from "web-tree-sitter";
 import { LANGUAGES } from "./chunking/languages.js";
 import { getParser } from "./chunking/syntaxChunker.js";
+import { DATA_DIR } from "./config.js";
+import { AppError } from "./errors.js";
+import { downloadZipball } from "./githubClient.js";
 import { resolveJs, resolvePython } from "./importResolvers.js";
+import { extractSourceFiles } from "./ingestion.js";
 import type { SourceFile } from "./types.js";
+import { loadManifest } from "./vectorStore.js";
 const CODE_LANGUAGES = new Set(["python", "javascript", "typescript", "tsx"]);
 
 /** Most "possible" targets for one obj.method() call. Why: more than this is a guess, not a match. */
@@ -452,4 +461,151 @@ export async function buildCallGraph(files: SourceFile[], meta: { repoId: string
     edges: [...edges.values()],
     stats,
   };
+}
+
+// ---------- Phase 2: saving and loading ----------
+
+const CALLGRAPHS_DIR = path.join(DATA_DIR, "callgraphs");
+
+/** Where a repo's call graph is saved, e.g. data/callgraphs/octo__hello.json. */
+function callGraphPath(repoId: string): string {
+  return path.join(CALLGRAPHS_DIR, `${repoId.replace("/", "__")}.json`);
+}
+
+/** Saves a call graph to disk. */
+export async function saveCallGraph(graph: CallGraph): Promise<void> {
+  await mkdir(CALLGRAPHS_DIR, { recursive: true });
+  await writeFile(callGraphPath(graph.repoId), JSON.stringify(graph));
+}
+
+/** Reads a saved call graph, or null if there isn't one. */
+async function loadCallGraph(repoId: string): Promise<CallGraph | null> {
+  try {
+    return JSON.parse(await readFile(callGraphPath(repoId), "utf8")) as CallGraph;
+  } catch {
+    return null;
+  }
+}
+
+// Repos whose call graph is being built right now. Why: two requests at once shouldn't both download the repo.
+const building = new Map<string, Promise<CallGraph>>();
+
+/**
+ * The call graph for the repo's indexed commit. If it's missing or from an older commit, downloads the code
+ * at the indexed commit and builds it now (a few seconds). Why: repos indexed before this feature still work.
+ */
+export async function getCallGraph(owner: string, repo: string, repoId: string): Promise<CallGraph> {
+  const manifest = await loadManifest(repoId);
+  if (!manifest) throw new AppError("This repo hasn't been indexed yet. Index it first.", 404);
+  const saved = await loadCallGraph(repoId);
+  if (saved && saved.commitSha === manifest.commitSha) return saved;
+
+  let job = building.get(repoId);
+  if (!job) {
+    job = (async () => {
+      const files = extractSourceFiles(await downloadZipball(owner, repo, manifest.commitSha));
+      const graph = await buildCallGraph(files, { repoId, commitSha: manifest.commitSha });
+      await saveCallGraph(graph);
+      return graph;
+    })().finally(() => building.delete(repoId));
+    building.set(repoId, job);
+  }
+  return job;
+}
+
+// ---------- Phase 2: what the API returns ----------
+
+/** One function in the picker list, with how many functions call it and how many it calls. */
+export interface FunctionSummary extends CallFunction {
+  callers: number;
+  callees: number;
+}
+
+/** Every function, most-called first. Why that order: the functions many others depend on are the interesting ones. */
+export function listFunctions(graph: CallGraph): FunctionSummary[] {
+  const callers = new Map<string, number>();
+  const callees = new Map<string, number>();
+  for (const e of graph.edges) {
+    callers.set(e.to, (callers.get(e.to) ?? 0) + 1);
+    callees.set(e.from, (callees.get(e.from) ?? 0) + 1);
+  }
+  return graph.functions
+    .map((f) => ({ ...f, callers: callers.get(f.id) ?? 0, callees: callees.get(f.id) ?? 0 }))
+    .sort((a, b) => b.callers - a.callers || b.callees - a.callees || a.id.localeCompare(b.id));
+}
+
+/** One function near the focused one: it calls the focus (a caller) or is called by it (a callee). */
+export interface FocusItem {
+  fn: CallFunction;
+  level: 1 | 2; // 1 = directly; 2 = one step further (calls a caller / is called by a callee)
+  parent: string; // the function it connects to (the focus, or a level-1 function)
+  line: number; // where the call is written
+  site: string; // the file the call is written in (the caller's file)
+  certain: boolean;
+}
+
+/** One function's callers and callees. The Calls tab (phase 3) draws this as a diagram. */
+export interface FocusView {
+  center: CallFunction;
+  depth: 1 | 2;
+  callers: FocusItem[];
+  callees: FocusItem[];
+  more: { callers: number; callees: number }; // left out to keep the diagram readable
+}
+
+/** Most functions on each side, and per function at level 2. Why: a diagram with more than this can't be read. */
+const MAX_PER_SIDE = 12;
+const MAX_LEVEL2_EACH = 3;
+
+/**
+ * One function's callers and callees, optionally one step further (depth 2).
+ * Order on each side: certain before possible, real code before tests, then most calls first.
+ */
+export function focusGraph(graph: CallGraph, id: string, depth: 1 | 2): FocusView {
+  const fnById = new Map(graph.functions.map((f) => [f.id, f]));
+  const center = fnById.get(id);
+  if (!center) throw new AppError("That function isn't in the call graph (the code may have changed since indexing).", 404);
+  const into = new Map<string, CallEdge[]>(); // function → arrows calling it
+  const outOf = new Map<string, CallEdge[]>(); // function → arrows it makes
+  for (const e of graph.edges) {
+    into.set(e.to, [...(into.get(e.to) ?? []), e]);
+    outOf.set(e.from, [...(outOf.get(e.from) ?? []), e]);
+  }
+  const order = (a: CallEdge, b: CallEdge, other: (e: CallEdge) => string) =>
+    Number(b.certain) - Number(a.certain) ||
+    Number(fnById.get(other(a))!.isTest) - Number(fnById.get(other(b))!.isTest) ||
+    b.count - a.count ||
+    other(a).localeCompare(other(b));
+
+  /** One side. callersSide: follow arrows backwards (who calls it); otherwise forwards (what it calls). */
+  const side = (callersSide: boolean) => {
+    const next = (fnId: string) => (callersSide ? (into.get(fnId) ?? []) : (outOf.get(fnId) ?? []));
+    const other = (e: CallEdge) => (callersSide ? e.from : e.to);
+    const item = (e: CallEdge, level: 1 | 2, parent: string): FocusItem => ({
+      fn: fnById.get(other(e))!, level, parent, line: e.line, site: fnById.get(e.from)!.file, certain: e.certain,
+    });
+    const items: FocusItem[] = [];
+    const seen = new Set([id]); // each function appears once
+    const level1 = next(id).filter((e) => other(e) !== id).sort((a, b) => order(a, b, other));
+    let more = Math.max(0, level1.length - MAX_PER_SIDE);
+    for (const e of level1.slice(0, MAX_PER_SIDE)) {
+      seen.add(other(e));
+      items.push(item(e, 1, id));
+    }
+    if (depth === 2) {
+      for (const first of items.filter((i) => i.level === 1)) {
+        const level2 = next(first.fn.id).filter((e) => !seen.has(other(e))).sort((a, b) => order(a, b, other));
+        for (const e of level2.slice(0, MAX_LEVEL2_EACH)) {
+          seen.add(other(e));
+          items.push(item(e, 2, first.fn.id));
+        }
+        more += Math.max(0, level2.length - MAX_LEVEL2_EACH);
+      }
+    }
+    return { items, more };
+  };
+
+  const callers = side(true);
+  const callees = side(false);
+  return { center, depth, callers: callers.items, callees: callees.items, more: { callers: callers.more, callees: callees.more } };
 }

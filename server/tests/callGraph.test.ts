@@ -1,7 +1,8 @@
-// Tests for the call graph (phase 1): reading functions and calls, and matching each call to a function.
+// Tests for the call graph. Phase 1: reading functions and calls, and matching each call to a function.
+// Phase 2: the function list and one function's callers and callees.
 // Small TypeScript and Python samples, each checking one matching rule. No network or disk.
 import { describe, expect, it } from "vitest";
-import { buildCallGraph, isTestFile, type CallGraph } from "../src/callGraph.js";
+import { buildCallGraph, focusGraph, isTestFile, listFunctions, type CallGraph } from "../src/callGraph.js";
 import type { SourceFile } from "../src/types.js";
 
 const ts = (path: string, text: string): SourceFile => ({ path, text, language: "typescript" });
@@ -148,5 +149,52 @@ describe("isTestFile", () => {
       expect(isTestFile(p), p).toBe(true);
     }
     for (const p of ["src/app.ts", "agents.py", "src/testing.ts", "contest.py"]) expect(isTestFile(p), p).toBe(false);
+  });
+});
+
+// ---------- Phase 2: the function list and one function's callers and callees ----------
+
+describe("listFunctions and focusGraph", async () => {
+  // a → b → c, and t (a test) → b. So b has 2 callers and 1 callee.
+  const g = await buildCallGraph(
+    [
+      ts("src/m.ts", `export function a() { b(); }\nexport function b() { c(); }\nexport function c() {}`),
+      ts("src/m.test.ts", `import { b } from "./m.js";\nfunction t() { b(); }`),
+    ],
+    { repoId: "o/r", commitSha: "abc" },
+  );
+
+  it("lists functions most-called first, with caller and callee counts", () => {
+    const list = listFunctions(g);
+    expect(list[0]).toMatchObject({ id: "src/m.ts#b", callers: 2, callees: 1 });
+  });
+
+  it("gives a function's callers and callees, real code before tests", () => {
+    const view = focusGraph(g, "src/m.ts#b", 1);
+    expect(view.center.id).toBe("src/m.ts#b");
+    expect(view.callers.map((i) => i.fn.id)).toEqual(["src/m.ts#a", "src/m.test.ts#t"]); // the test comes last
+    expect(view.callees.map((i) => i.fn.id)).toEqual(["src/m.ts#c"]);
+    expect(view.callers[1]).toMatchObject({ level: 1, parent: "src/m.ts#b", site: "src/m.test.ts", line: 2, certain: true });
+  });
+
+  it("goes one step further at depth 2", () => {
+    const view = focusGraph(g, "src/m.ts#c", 2);
+    expect(view.callers.map((i) => [i.fn.id, i.level, i.parent])).toEqual([
+      ["src/m.ts#b", 1, "src/m.ts#c"],
+      ["src/m.ts#a", 2, "src/m.ts#b"], // a calls b, which calls c
+      ["src/m.test.ts#t", 2, "src/m.ts#b"],
+    ]);
+  });
+
+  it("keeps at most 12 per side and counts the rest", async () => {
+    const callers = Array.from({ length: 15 }, (_, i) => `export function f${i}() { target(); }`).join("\n");
+    const big = await buildCallGraph([ts("src/big.ts", `${callers}\nexport function target() {}`)], { repoId: "o/r", commitSha: "abc" });
+    const view = focusGraph(big, "src/big.ts#target", 1);
+    expect(view.callers).toHaveLength(12);
+    expect(view.more.callers).toBe(3);
+  });
+
+  it("says clearly when the function isn't in the graph", () => {
+    expect(() => focusGraph(g, "src/m.ts#gone", 1)).toThrow("isn't in the call graph");
   });
 });

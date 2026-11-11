@@ -149,6 +149,12 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
     expect(vi.mocked(answer).mock.lastCall?.[4]).toBe("");
   });
 
+  // Call graph (phase 2): the routes check their input and need an indexed repo.
+  it("call graph routes: 404 for a repo that isn't indexed, 400 without a function", async () => {
+    expect((await fetch(`${baseUrl}/api/repos/octo/never/calls`)).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/repos/octo/never/calls/focus`)).status).toBe(400);
+  });
+
   it("rejects an empty question", async () => {
     const res = await fetch(`${baseUrl}/api/repos/octo/hello/chat`, {
       method: "POST",
