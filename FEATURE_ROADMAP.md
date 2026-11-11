@@ -66,7 +66,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Saved chat history** | PRD | M | Keep conversations per repo across sessions, in SQLite (`better-sqlite3`). The same database can later hold the code graph. |
 | **Incremental re-index** | Opus + Claude Code | M | Re-embed only files whose content changed since the last index. |
 | **Usage and cost display** | Claude Code | S | Show the Gemini tokens used per answer and per index. |
-| **Dependency scan** | Claude Code | S–M | Read `package.json`, `requirements.txt`, `go.mod`, `pom.xml` and similar files directly, to give exact dependencies and versions without relying on the AI. |
+| **Dependency scan** ✅ Done | Claude Code | S–M | Read `package.json`, `requirements.txt`, `go.mod`, `pom.xml` and similar files directly, to give exact dependencies and versions without relying on the AI. |
 
 ## Phase 4 — Code graph and architecture (~3–5 weeks)
 
@@ -504,3 +504,53 @@ Example: *"Where is `formatChunk` used?"* found 1 of the 3 files that use it bef
 | [server/tests/vectorStore.test.ts](server/tests/vectorStore.test.ts) | 3 tests on a real temporary LanceDB table: whole-name matching, case, folder filter, index built on first use for old tables |
 
 **How to demo:** Chat → ask *"Where is `formatChunk` used?"* → open *Sources*: `rag.ts`, `report.ts` and the tests that use it. Then ask a plain question to show nothing else changed.
+
+### Dependency scan ✅ (Phase 3)
+
+**What it does:** reads the repo's dependency files directly and lists every library with its exact version. It shows as a new **Dependencies (from the dependency files)** section in the health report and the downloaded `.md`:
+- how many files were read, and how many libraries (needed to run vs development only)
+- ⚠ libraries with **no version**, because a fresh install can then get a different version and behave differently
+- ⚠ files that couldn't be read (e.g. broken JSON), instead of failing silently
+- one table per language: library, version, type, which file declares it
+
+The AI is also given the exact list, so its "Tech stack" and "Dependencies" text uses the real names and versions.
+
+**Why:** the AI only sees a few code chunks, so it could miss libraries or get versions wrong. Reading the files is exact, costs nothing (no AI) and is the base for a vulnerable-dependency check later.
+
+**Files read** ([server/src/dependencies.ts](server/src/dependencies.ts), one small reader each):
+| File | Language | Notes |
+|---|---|---|
+| `package.json` | JavaScript / TypeScript | dependencies, peer, optional, dev |
+| `requirements*.txt` | Python | skips comments, `-r`/`-e` options and URLs; `requirements-dev.txt` counts as dev |
+| `pyproject.toml` | Python | PEP 621 `[project]` and optional groups, `[dependency-groups]`, Poetry. A small reader for just these parts, not a full TOML parser, so no new library |
+| `go.mod` | Go | `require` lines and blocks; `// indirect` marked |
+| `pom.xml` | Java | fills in `${property}` versions; skips `<dependencyManagement>` and build plugins; no version = "managed" by a parent pom |
+
+**How it works:**
+1. Runs at the end of indexing on the files already downloaded (instant, no AI). Saved in `data/dependencies/`.
+2. Repos indexed before this feature are scanned the first time it's needed (downloads the code at the indexed commit, a few seconds), like the import graph.
+3. In the report, each library is counted once even if several files declare it (e.g. `typescript` in both `server/` and `web/`), with every version and file listed.
+4. `GET /api/repos/:owner/:repo/dependencies` returns the raw scan.
+
+**Two things found while testing:**
+- The AI wrote a made-up citation, `[Dependency files]`, after library names. A prompt rule didn't stop it, so `removeDependencyCitations()` now removes it from the AI's text. That always works, whatever the AI writes.
+- `plural()` would have written "librarys", so it now accepts an irregular plural.
+
+**Tested:**
+- **github-project:** 3 files (`package.json`, `server/package.json`, `web/package.json`), 27 entries = **25 libraries** (15 to run, 10 dev). Matches the real files at the indexed commit exactly. The regenerated report's "Tech stack" quotes the exact versions (Express 5.3.0, React 19.3.1, LanceDB 0.41.0) with no stray citations.
+- **ai_agent_oop:** no dependency file at all. A real finding: it uses `pytest` but never declares it, so a new developer has to guess what to install.
+
+**Known limits:** reads declared versions, not lock files, so `^5.1.0` means "5.1.0 or a newer 5.x", not the exact installed version. Not read yet: Gradle, Cargo, Gemfile, composer.json. No vulnerability check yet (that's in "Later").
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/dependencies.ts](server/src/dependencies.ts) | **New.** The readers, `scanDependencies()`, `isUnpinned()`, `getDependencies()` |
+| [server/src/indexer.ts](server/src/indexer.ts) | Scans and saves at the end of indexing (a failure doesn't fail the index) |
+| [server/src/report.ts](server/src/report.ts) | `dependenciesSection()`, `libraryRows()`, `dependencySummaryForAI()`, `removeDependencyCitations()`; `plural()` takes irregular plurals |
+| [server/src/prompts.ts](server/src/prompts.ts) | A rule telling the AI to use the exact list; extra rules are now numbered automatically |
+| [server/src/app.ts](server/src/app.ts) | `GET /api/repos/:owner/:repo/dependencies` |
+| [server/tests/dependencies.test.ts](server/tests/dependencies.test.ts) | **New.** 13 tests: each reader (incl. multi-line TOML arrays, Poetry, Go blocks, pom properties and comments), the scan, broken files, no-version detection |
+| [server/tests/report.test.ts](server/tests/report.test.ts) | 5 tests: grouping, the section (warnings, errors, escaping `\|`), empty and failed scans, the AI prompt, citation clean-up |
+
+**How to demo:** open a repo → **Report** → **Regenerate** → scroll to *Dependencies*. Point out the counts, the per-language table, and the "Tech stack" section quoting the same versions.

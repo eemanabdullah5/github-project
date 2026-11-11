@@ -71,12 +71,22 @@ export function followUpsPrompt(reader: string, count: number, scope?: { kind: "
 // 5. F5: rules for writing the health report.
 // `headings` are the section titles the report must use, in order (e.g. ["Overview", "Tech stack", …]).
 // `hasHistory` is true when a git history summary (F4 hotspots) is included, so the AI can use it in the risks.
+// `hasDependencies` is true when the exact dependency list (dependencies.ts) is included.
 // The report is always written in the Executive style.
-export function reportPrompt(headings: string[], hasHistory = false): string {
-  const historyRule = hasHistory
-    ? `
-7. The "Git history summary" block lists files that change often, files that change together, and areas only one person has changed. In "Risks and tech debt", mention the 1-2 most important of these where they add to what the code shows (e.g. a complicated file that also changes often). Name those files in backticks, like \`src/app.ts\`, and don't give them [path:L…] citations. Don't repeat the whole list: the report adds the full hotspot section itself.`
-    : "";
+export function reportPrompt(headings: string[], hasHistory = false, hasDependencies = false): string {
+  // Extra rules, only when their data is included. Numbered from 7, after the fixed rules.
+  const extra: string[] = [];
+  if (hasHistory) {
+    extra.push(
+      `The "Git history summary" block lists files that change often, files that change together, and areas only one person has changed. In "Risks and tech debt", mention the 1-2 most important of these where they add to what the code shows (e.g. a complicated file that also changes often). Name those files in backticks, like \`src/app.ts\`, and don't give them [path:L…] citations. Don't repeat the whole list: the report adds the full hotspot section itself.`,
+    );
+  }
+  if (hasDependencies) {
+    extra.push(
+      `The "Dependency files" block is the exact list of libraries and versions, read directly from the repo's dependency files. In "Tech stack" and "Dependencies and external services", use these names and versions and never contradict them. Mention only the most important ones: the report adds the full list itself. These facts need no citation: never write [Dependency files] or any [...] after them. If it helps, say which file in words, like "(from \`server/package.json\`)".`,
+    );
+  }
+  const historyRule = extra.map((rule, i) => `\n${7 + i}. ${rule}`).join("");
   return `You write a short health report about a GitHub repository for a CTO or engineering manager.
 
 Rules:

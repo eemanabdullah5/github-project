@@ -6,6 +6,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { buildArchitecture } from "./architecture.js";
 import { ROOT_DIR } from "./config.js";
+import { getDependencies } from "./dependencies.js";
 import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { analyzeHistory, loadHistory } from "./gitHistory.js";
@@ -107,6 +108,13 @@ export function createApp() {
     const { owner, repo } = repoParams(req);
     const graph = await getGraph(owner, repo, toRepoId(owner, repo));
     res.json({ ...graph, summary: summarizeGraph(graph) });
+  });
+
+  // Dependency scan: every library and version from package.json, requirements.txt etc. (no AI).
+  // Saved at indexing; for repos indexed before this feature it's scanned now (a few seconds).
+  app.get("/api/repos/:owner/:repo/dependencies", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await getDependencies(owner, repo, toRepoId(owner, repo)));
   });
 
   // Phase 4: the architecture map (modules, the imports between them, cycles, hotspot colours, Mermaid diagram).

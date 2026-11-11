@@ -5,6 +5,7 @@ import { chunkFile } from "./chunking/index.js";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
 import { downloadZipball, getLatestCommitSha, getRepo, toRepoId } from "./githubClient.js";
+import { saveDependencies, scanDependencies } from "./dependencies.js";
 import { buildImportGraph, saveGraph } from "./importGraph.js";
 import { checkRepoSize, extractSourceFiles } from "./ingestion.js";
 import { checkModels, embedDocuments } from "./llm.js";
@@ -104,6 +105,14 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
     await saveGraph(await buildImportGraph(files, { repoId: current.repoId, commitSha: sha }));
   } catch (err) {
     console.error("Import graph failed:", err instanceof Error ? err.message : err);
+  }
+
+  // 6. Dependency scan: read package.json, requirements.txt etc. (no AI, instant).
+  // Same rule: a failure must not fail the index, it's redone the first time it's asked for.
+  try {
+    await saveDependencies(scanDependencies(files, { repoId: current.repoId, commitSha: sha }));
+  } catch (err) {
+    console.error("Dependency scan failed:", err instanceof Error ? err.message : err);
   }
   current.step = "ready";
 }

@@ -7,10 +7,14 @@ import {
   hotspotsSection,
   languageBreakdown,
   architectureSection,
+  dependenciesSection,
+  libraryRows,
   mergeRoundRobin,
+  removeDependencyCitations,
   structureSection,
 } from "../src/report.js";
 import { buildArchitecture } from "../src/architecture.js";
+import type { DependencyScan } from "../src/dependencies.js";
 import type { Chunk, HistoryReport, ImportGraph, Manifest } from "../src/types.js";
 
 // Small helpers to build test data.
@@ -224,5 +228,74 @@ describe("architectureSection (Phase 4 architecture map)", () => {
 
     const allLinked = { ...history, coChangeAll: history.coChangeAll.slice(0, 2) };
     expect(architectureSection(buildArchitecture(graph, allLinked))).toContain("None: all 2 pairs of code files");
+  });
+});
+
+describe("dependenciesSection and the AI's dependency list", () => {
+  const dep = (name: string, version: string, file: string, kind: "runtime" | "dev" = "runtime", ecosystem: "npm" | "pip" = "npm") => ({ name, version, kind, ecosystem, file });
+  const scan: DependencyScan = {
+    repoId: "o/r",
+    commitSha: "abc",
+    generatedAt: "",
+    files: [
+      { path: "server/package.json", ecosystem: "npm", count: 3 },
+      { path: "web/package.json", ecosystem: "npm", count: 2 },
+      { path: "requirements.txt", ecosystem: "pip", count: 1 },
+      { path: "broken/package.json", ecosystem: "npm", count: 0, error: "Unexpected token" },
+    ],
+    dependencies: [
+      dep("express", "^5.1.0", "server/package.json"),
+      dep("typescript", "^5.6.0", "server/package.json", "dev"),
+      dep("vitest", "^3.2.0", "server/package.json", "dev"),
+      dep("typescript", "^5.7.0", "web/package.json", "dev"), // same library, another file and version
+      dep("vitest", "1 || 2", "web/package.json", "dev"),
+      dep("requests", "", "requirements.txt", "runtime", "pip"), // no version
+    ],
+  };
+
+  it("counts each library once, lists every version and file, and runtime ones first", () => {
+    const rows = libraryRows(scan);
+    expect(rows.map((r) => r.name)).toEqual(["express", "requests", "typescript", "vitest"]);
+    expect(rows.find((r) => r.name === "typescript")).toMatchObject({ versions: ["^5.6.0", "^5.7.0"], files: ["server/package.json", "web/package.json"] });
+  });
+
+  it("writes the section with counts, a no-version warning, read errors and a table per language", () => {
+    const text = dependenciesSection(scan);
+    expect(text).toContain("## Dependencies (from the dependency files)");
+    expect(text).toContain("Read 3 dependency files: `server/package.json` (3), `web/package.json` (2), `requirements.txt` (1).");
+    expect(text).toContain("**4 libraries**: 2 needed to run the app, 2 only for development and tests.");
+    expect(text).toContain("⚠ **1 library has no version**");
+    expect(text).toContain("`requests`");
+    expect(text).toContain("⚠ Couldn't read `broken/package.json`: Unexpected token");
+    expect(text).toContain("### JavaScript / TypeScript (npm)");
+    expect(text).toContain("### Python (pip)");
+    expect(text).toContain("| express | `^5.1.0` | runtime | `server/package.json` |");
+    expect(text).toContain("`1 \\|\\| 2`"); // "|" escaped so the table doesn't break
+    expect(text).toContain("| requests | _none_ | runtime | `requirements.txt` |");
+  });
+
+  it("says so when there are no dependency files, or the scan failed", () => {
+    expect(dependenciesSection({ ...scan, files: [], dependencies: [] })).toContain("No dependency files found");
+    expect(dependenciesSection(null)).toContain("couldn't be read");
+  });
+
+  it("gives the AI the exact list and a rule not to contradict it", () => {
+    const system = buildReportPrompt(manifest, [chunk("x")], null, scan).messages[0].content;
+    expect(system).toContain("<<<REPO DEPENDENCY FILES (exact)>>>");
+    expect(system).toContain("needed to run: express ^5.1.0");
+    expect(system).toContain("development only: typescript ^5.6.0 / ^5.7.0");
+    expect(system).toContain("requests (no version)");
+    expect(system).toContain("7. The \"Dependency files\" block is the exact list"); // rule 7 when there's no history
+    const without = buildReportPrompt(manifest, [chunk("x")]).messages[0].content;
+    expect(without).not.toContain("DEPENDENCY FILES");
+    expect(without).not.toContain("Dependency files");
+  });
+});
+
+describe("removeDependencyCitations", () => {
+  it("removes made-up 'Dependency files' citations and keeps real ones", () => {
+    expect(removeDependencyCitations("Express 5 [README.md:L1-L2, Dependency files].")).toBe("Express 5 [README.md:L1-L2].");
+    expect(removeDependencyCitations("React 19 [Dependency files].")).toBe("React 19.");
+    expect(removeDependencyCitations("Uses [a.ts:L1-L3] and [b.ts:L4].")).toBe("Uses [a.ts:L1-L3] and [b.ts:L4].");
   });
 });

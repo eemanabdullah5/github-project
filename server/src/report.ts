@@ -6,11 +6,14 @@
 //  - Hotspots and knowledge risk: copied word for word from the F4 git history analysis, no AI.
 //  - Code structure and architecture map: from the import graph (Phase 4), no AI. The map is a Mermaid
 //    diagram, which the app draws and GitHub shows as a picture in the downloaded file.
+//  - Dependencies: the exact libraries and versions from the dependency files (dependencies.ts), no AI.
+//    The AI also gets this list, so its "Tech stack" and "Dependencies" text matches it.
 // The report is saved in data/reports/, so opening it again is instant. "Regenerate" makes a new one.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildArchitecture, type ArchitectureMap } from "./architecture.js";
 import { CHARS_PER_TOKEN, DATA_DIR, NUM_CTX } from "./config.js";
+import { getDependencies, isUnpinned, type Dependency, type DependencyScan, type Ecosystem } from "./dependencies.js";
 import { AppError } from "./errors.js";
 import { loadHistory } from "./gitHistory.js";
 import { getGraph, summarizeGraph } from "./importGraph.js";
@@ -100,8 +103,9 @@ export function factsSection(manifest: Manifest): string {
 }
 
 // Writes a number with the right word form: plural(1, "change") → "1 change", plural(3, "change") → "3 changes".
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
+// Irregular words pass their plural: plural(2, "library", "libraries") → "2 libraries".
+function plural(n: number, word: string, many = `${word}s`): string {
+  return `${n} ${n === 1 ? word : many}`;
 }
 
 // The "Hotspots and knowledge risk" section, copied from the F4 analysis (no AI, so the numbers are exact).
@@ -244,6 +248,129 @@ export function hiddenCouplingLines(map: ArchitectureMap): string[] {
   return lines;
 }
 
+// ---------- Dependencies (from dependencies.ts, no AI) ----------
+
+/** Display names for each kind of dependency file. */
+const ECOSYSTEM_NAMES: Record<Ecosystem, string> = {
+  npm: "JavaScript / TypeScript (npm)",
+  pip: "Python (pip)",
+  go: "Go",
+  maven: "Java (Maven)",
+};
+/** Most rows shown per language. Why: a huge list buries the important ones; the rest are counted. */
+const MAX_DEP_ROWS = 40;
+
+/** One library across all files: e.g. "react" declared in two package.json files counts once. */
+export interface LibraryRow {
+  name: string;
+  ecosystem: Ecosystem;
+  versions: string[]; // every version written, e.g. ["^19.0.0"], or two if files disagree
+  kind: Dependency["kind"]; // "runtime" if any file needs it to run
+  files: string[];
+  unpinned: boolean; // no version anywhere, so installs can change
+}
+
+/** Groups the scan into one row per library. Runtime libraries first, then by name. */
+export function libraryRows(scan: DependencyScan): LibraryRow[] {
+  const rank: Record<Dependency["kind"], number> = { runtime: 0, optional: 1, indirect: 2, dev: 3 };
+  const rows = new Map<string, LibraryRow>();
+  for (const dep of scan.dependencies) {
+    const key = `${dep.ecosystem}:${dep.name.toLowerCase()}`;
+    const row = rows.get(key) ?? { name: dep.name, ecosystem: dep.ecosystem, versions: [], kind: dep.kind, files: [], unpinned: true };
+    if (dep.version && !row.versions.includes(dep.version)) row.versions.push(dep.version);
+    if (!row.files.includes(dep.file)) row.files.push(dep.file);
+    if (rank[dep.kind] < rank[row.kind]) row.kind = dep.kind;
+    row.unpinned &&= isUnpinned(dep);
+    rows.set(key, row);
+  }
+  return [...rows.values()].sort((a, b) => rank[a.kind] - rank[b.kind] || a.name.localeCompare(b.name));
+}
+
+/** Text for a Markdown table cell. Why: a "|" would end the cell early, so it's escaped. */
+const cell = (text: string) => text.replace(/\|/g, "\\|");
+
+/**
+ * The "Dependencies" section: every library with its version, grouped by language, plus a warning
+ * for libraries with no version. Says so plainly if there are no dependency files or the scan failed.
+ */
+export function dependenciesSection(scan: DependencyScan | null): string {
+  const lines = ["## Dependencies (from the dependency files)", ""];
+  if (!scan) {
+    lines.push("_The dependency files couldn't be read for this repo, so this section is missing. Try regenerating the report._");
+    return lines.join("\n");
+  }
+  if (scan.files.length === 0) {
+    lines.push("_No dependency files found (package.json, requirements.txt, pyproject.toml, go.mod or pom.xml)._");
+    return lines.join("\n");
+  }
+
+  const rows = libraryRows(scan);
+  const toRun = rows.filter((r) => r.kind !== "dev").length;
+  const readFiles = scan.files.filter((f) => !f.error).map((f) => `\`${f.path}\` (${f.count})`);
+  if (readFiles.length) lines.push(`Read ${plural(readFiles.length, "dependency file")}: ${readFiles.join(", ")}.`, "");
+  lines.push(`**${plural(rows.length, "library", "libraries")}**: ${toRun} needed to run the app, ${rows.length - toRun} only for development and tests.`);
+
+  const unpinned = rows.filter((r) => r.unpinned);
+  if (unpinned.length) {
+    const names = unpinned.slice(0, 10).map((r) => `\`${r.name}\``).join(", ");
+    const more = unpinned.length > 10 ? `, and ${unpinned.length - 10} more` : "";
+    const what = unpinned.length === 1 ? "1 library has" : `${unpinned.length} libraries have`;
+    lines.push("", `⚠ **${what} no version**, so a fresh install can get a different version and behave differently: ${names}${more}.`);
+  }
+  for (const f of scan.files.filter((f) => f.error)) lines.push("", `⚠ Couldn't read \`${f.path}\`: ${f.error}`);
+
+  for (const ecosystem of Object.keys(ECOSYSTEM_NAMES) as Ecosystem[]) {
+    const group = rows.filter((r) => r.ecosystem === ecosystem);
+    if (!group.length) continue;
+    lines.push("", `### ${ECOSYSTEM_NAMES[ecosystem]}`, "", "| Library | Version | Type | Declared in |", "|---|---|---|---|");
+    for (const r of group.slice(0, MAX_DEP_ROWS)) {
+      const version = r.versions.length ? r.versions.map((v) => `\`${cell(v)}\``).join(", ") : "_none_";
+      const type = r.kind === "dev" ? "dev only" : r.kind;
+      lines.push(`| ${cell(r.name)} | ${version} | ${type} | ${r.files.map((f) => `\`${f}\``).join(", ")} |`);
+    }
+    if (group.length > MAX_DEP_ROWS) lines.push("", `_…and ${group.length - MAX_DEP_ROWS} more._`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Removes made-up "Dependency files" citations from the AI's text: "[a.ts:L1-L2, Dependency files]" → "[a.ts:L1-L2]",
+ * and "[Dependency files]" disappears. Why: the AI sometimes cites the dependency list even when told not to,
+ * and it isn't a file with lines, so it would show as stray text.
+ */
+export function removeDependencyCitations(text: string): string {
+  return text.replace(/\s?\[([^\]]*)\]/g, (whole, inside: string) => {
+    const parts = inside.split(",").map((p) => p.trim());
+    const kept = parts.filter((p) => !/^dependency files?$/i.test(p));
+    if (kept.length === parts.length) return whole; // nothing to remove: leave it exactly as it was
+    return kept.length ? `${whole.startsWith(" ") ? " " : ""}[${kept.join(", ")}]` : "";
+  });
+}
+
+/** Most libraries listed for the AI. Why: keeps the prompt small; the full list is in the report anyway. */
+const MAX_DEPS_FOR_AI = 120;
+
+/** A short version of the dependency list for the AI. Empty if there's nothing to tell it. */
+export function dependencySummaryForAI(scan: DependencyScan | null): string {
+  if (!scan || scan.dependencies.length === 0) return "";
+  const rows = libraryRows(scan).slice(0, MAX_DEPS_FOR_AI);
+  const lines: string[] = [];
+  for (const ecosystem of Object.keys(ECOSYSTEM_NAMES) as Ecosystem[]) {
+    const group = rows.filter((r) => r.ecosystem === ecosystem);
+    if (!group.length) continue;
+    const files = [...new Set(group.flatMap((r) => r.files))].join(", ");
+    const list = (dev: boolean) =>
+      group
+        .filter((r) => (r.kind === "dev") === dev)
+        .map((r) => `${r.name} ${r.versions.join(" / ") || "(no version)"}`)
+        .join(", ");
+    lines.push(`${ECOSYSTEM_NAMES[ecosystem]} (from ${files}):`);
+    if (list(false)) lines.push(`  needed to run: ${list(false)}`);
+    if (list(true)) lines.push(`  development only: ${list(true)}`);
+  }
+  return `<<<REPO DEPENDENCY FILES (exact)>>>\n${lines.join("\n")}\n<<<END DEPENDENCY FILES>>>`;
+}
+
 // Merges the search results of all sections fairly: first every section's best chunk, then every
 // section's second best, and so on. Repeats are skipped. So if the list must be cut, each section keeps its best code.
 export function mergeRoundRobin(lists: Chunk[][]): Chunk[] {
@@ -268,21 +395,25 @@ export function buildReportPrompt(
   manifest: Pick<Manifest, "repoId" | "fileTree" | "readme">,
   chunks: Chunk[],
   history: HistoryReport | null = null,
+  deps: DependencyScan | null = null,
 ): { messages: ChatTurn[]; usedChunks: Chunk[] } {
-  // F4 hotspots, if analysed. Counted in the budget below before the chunks.
+  // F4 hotspots, if analysed, and the exact dependency list. Counted in the budget below before the chunks.
   const historyText = historySummaryForAI(history);
+  const depsText = dependencySummaryForAI(deps);
 
   // The report rules, with this report's section headings filled in. Prompt text: prompts.ts
   const rules = reportPrompt(
     REPORT_SECTIONS.map((s) => s.heading),
     Boolean(historyText),
+    Boolean(depsText),
   );
 
   const repoContext =
     `Repository: ${manifest.repoId}\n\n` +
     `<<<REPO FILE TREE>>>\n${truncateTree(manifest.fileTree)}\n<<<END FILE TREE>>>\n\n` +
     `<<<REPO README>>>\n${truncateReadme(manifest.readme) || "(no README)"}\n<<<END README>>>` +
-    (historyText ? `\n\nGit history summary:\n${historyText}` : "");
+    (historyText ? `\n\nGit history summary:\n${historyText}` : "") +
+    (depsText ? `\n\nDependency files:\n${depsText}` : "");
 
   // Keep adding chunks while they fit in the model's context window.
   const tokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
@@ -324,18 +455,21 @@ export async function generateReport(repoId: string): Promise<HealthReport> {
     // 2. One AI call writes all the AI sections at once. It also gets the hotspot summary (if analysed),
     //    so the risks section can mention files that change often.
     const history = (await loadHistory(repoId))?.report ?? null;
-    const { messages, usedChunks } = buildReportPrompt(manifest, mergeRoundRobin(lists), history);
-    const aiSections = (await chat(messages)).trim();
+    // The exact dependency list (saved at indexing, or scanned now for older repos). Optional: the report works without it.
+    const [owner, name] = repoId.split("/");
+    const deps = await getDependencies(owner, name, repoId).catch(() => null);
+    const { messages, usedChunks } = buildReportPrompt(manifest, mergeRoundRobin(lists), history, deps);
+    const aiSections = removeDependencyCitations((await chat(messages)).trim());
 
     // 3. Put the report together: title, facts, the AI's sections, then the git history section.
     // Phase 4: the import graph (built during indexing, or now for repos indexed before this feature).
-    const [owner, name] = repoId.split("/");
     const graph = await getGraph(owner, name, repoId).catch(() => null);
     const markdown = [
       `# Health report: ${manifest.repoId}`,
       `_Generated ${new Date().toISOString().slice(0, 10)} by the GitHub Repository AI Assistant._`,
       factsSection(manifest),
       aiSections,
+      dependenciesSection(deps),
       structureSection(graph),
       architectureSection(graph && buildArchitecture(graph, history)),
       hotspotsSection(history),
