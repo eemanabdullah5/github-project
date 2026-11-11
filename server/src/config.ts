@@ -68,6 +68,9 @@ export const CHARS_PER_TOKEN = 4;
 
 // RAG
 export const TOP_K = 8;
+// Phase 2 hybrid search (hybridSearch.ts): when a question names something in the code (e.g. `resolveScope`),
+// keyword search runs alongside the meaning (vector) search. HYBRID_SEARCH=off in .env turns it off.
+export const HYBRID_SEARCH = env("HYBRID_SEARCH", "on").toLowerCase() !== "off";
 export const HISTORY_TURNS = 3;
 export const MAX_TREE_LINES = 200;
 export const MAX_README_TOKENS = 1500;

@@ -1,7 +1,8 @@
 // RAG — "retrieval-augmented generation" (ARCHITECTURE §10). Answers a question about a repo:
 //  1. If there is chat history, rewrite a follow-up ("where is that called?") into a full question.
-//  2. Turn the question into a vector and fetch the 8 closest code chunks (only from one folder or file,
-//     if the user picked one: Phase 2 "Ask about one folder", see scope.ts).
+//  2. Turn the question into a vector and fetch the 8 closest code chunks, plus keyword matches for any code
+//     names in the question (Phase 2 hybrid search, see hybridSearch.ts). Only from one folder or file
+//     if the user picked one (Phase 2 "Ask about one folder", see scope.ts).
 //  3. Build a prompt: rules + README/file tree + chunks + recent history + the question.
 //  4. Stream the model's answer back, with the list of sources.
 //  5. F3: after the answer, suggest 3 follow-up questions the user might ask next.
@@ -12,7 +13,8 @@ import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
 import { DEPTH_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, scopeNote, type AnswerDepth } from "./prompts.js";
 import { resolveScope, scopeFilter, type Scope } from "./scope.js";
 import type { ChatMessage, Chunk, Manifest, Source } from "./types.js";
-import { loadManifest, query } from "./vectorStore.js";
+import { searchChunks } from "./hybridSearch.js";
+import { loadManifest } from "./vectorStore.js";
 
 /** Tokens kept free in the context window for the model's answer. */
 const ANSWER_RESERVE_TOKENS = 2048;
@@ -177,7 +179,9 @@ export async function answer(
 
   const searchQuery = await rewriteQuestion(question, history);
   const vector = await embedQuery(searchQuery);
-  const chunks = await query(repoId, vector, TOP_K, scope ? scopeFilter(scope) : undefined);
+  // Phase 2 hybrid search: code names in the question (e.g. `formatChunk`) are also searched for by keyword.
+  // Names are looked for in both the question and its rewritten version, as the rewrite can drop backticks.
+  const { chunks } = await searchChunks(repoId, `${question}\n${searchQuery}`, vector, TOP_K, scope ? scopeFilter(scope) : undefined);
   // A file in the index with no chunks (e.g. an empty file): say so instead of answering from nothing.
   if (scope && chunks.length === 0) throw new AppError(`There's no indexed code in "${scope.path}" to answer from.`, 400);
   const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope });

@@ -54,7 +54,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | Feature | Source | Effort | Notes |
 |---|---|---|---|
 | **Verified citations** ✅ Done | Opus | S | After each answer, check that every `[path:Lx-Ly]` citation points to a real file and lines that were retrieved, and flag any that don't. |
-| **Hybrid search** | Opus + Claude Code | S–M | Add LanceDB's built-in full-text search alongside vector search, so exact function and class names are always found. |
+| **Hybrid search** ✅ Done | Opus + Claude Code | S–M | Add LanceDB's built-in full-text search alongside vector search, so exact function and class names are always found. |
 | **Evaluation harness** | Opus | M | Extend [server/scripts/evalRetrieval.ts](server/scripts/evalRetrieval.ts) with 30–50 questions per test repo. Measure file recall@8 and citation validity before and after every retrieval change. |
 | **Ask about one folder** ✅ Done | Claude Code | S | Limit a question to a folder or file, such as `src/auth`. |
 
@@ -457,3 +457,50 @@ It appears in the **Architecture** tab (a headline number plus a *Hidden couplin
 | [web/src/index.css](web/src/index.css) | Styles for the box and tag |
 
 **How to demo:** open a repo → Chat → in **Search in**, pick `server/src/chunking/` → ask *"How does it split code into chunks?"* → open *Sources*: every file is from that folder → clear the box (×) and ask again to compare.
+
+### Hybrid search ✅ (Phase 2)
+
+**What it does:** when a question names something in the code, such as *"Where is `formatChunk` used?"*, the app now runs a **keyword search** for that name alongside the usual meaning search, and merges the two. Questions in plain English (*"How are secrets kept out of the index?"*) work exactly as before.
+
+**Why:** meaning (vector) search finds code that is *about* the question. That's right for "how does login work?", but for "where is X used?" it returns code about similar things and misses lines that use the exact name. Keyword search finds the exact name.
+
+**What we found first (on a copy of the index, so `data/` wasn't touched):**
+- Searching by keyword for **every** question made a plain-English question worse (the right file dropped from 1st to 3rd), because ordinary words like "rate" and "limits" matched lots of unrelated code.
+- So keyword search only runs when the question contains a **code name**, and only searches for those names.
+
+**Measured on github-project** (8 "where is X used?" questions, 8 chunks each):
+
+| | Meaning search only | Hybrid |
+|---|---|---|
+| Chunks containing the name (of 64) | 22 | **39** |
+| Files using the name, found | 17 | **28** |
+
+Example: *"Where is `formatChunk` used?"* found 1 of the 3 files that use it before, and all 3 with hybrid.
+
+**How it works** ([server/src/hybridSearch.ts](server/src/hybridSearch.ts)):
+1. `codeNames()` picks out code names: anything in `backticks`, camelCase / PascalCase with an inner capital (`resolveScope`, `RecommenderAgent`), snake_case (`MAX_HIDDEN_PAIRS`), and file names (`rag.ts`). Plain words and all-caps words like "API" or "README" don't count: they're usually ordinary English. At most 5 names.
+2. No names → meaning search only, unchanged.
+3. Names → both searches run at once (16 results each) and `mergeRanked()` combines them with **Reciprocal Rank Fusion**: each chunk scores 1/(60 + rank) in each list, and the scores are added. A chunk near the top of both lists wins. Only ranks are used, so the two searches' very different scores never have to be compared. Ties go to the meaning result.
+4. Names are looked for in the question **and** in its rewritten version (for follow-ups like "where else is it used?").
+5. "Ask about one folder" applies to both searches.
+6. **Can't break search:** if keyword search fails, the meaning results are used on their own and the error is logged.
+
+**The keyword index** ([server/src/vectorStore.ts](server/src/vectorStore.ts)): LanceDB's built-in full-text index (BM25) on the chunk text, using its **"code" tokenizer**, which keeps `camelCase` and `snake_case` names whole. Searching "format" doesn't match `formatChunk`, and case doesn't matter. It's built at the end of indexing. **Repos indexed earlier get it automatically the first time it's needed** (under a second), so no re-index is required. Checked: github-project's real index got it on the first question.
+
+**Off switch:** `HYBRID_SEARCH=off` in `.env` goes back to meaning search only (documented in `.env.example`).
+
+**A bug the tests caught:** LanceDB's index settings object can only be used once, so the second repo to build a keyword index would have failed with *"attempt to use an index more than once"*. The settings are now created fresh each time.
+
+**Known limits:** a plain word that is also a code name (e.g. "query") only counts if it's in backticks. The health report (F5) still uses meaning search only: its section questions are plain English, so keyword search wouldn't run anyway.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/hybridSearch.ts](server/src/hybridSearch.ts) | **New.** `codeNames()`, `mergeRanked()`, `searchChunks()` |
+| [server/src/vectorStore.ts](server/src/vectorStore.ts) | Keyword index (built at indexing, or on first use), `keywordQuery()`, shared `toChunk()` |
+| [server/src/rag.ts](server/src/rag.ts) | `answer()` uses `searchChunks()` |
+| [server/src/config.ts](server/src/config.ts), [.env.example](.env.example) | `HYBRID_SEARCH` switch, on by default |
+| [server/tests/hybridSearch.test.ts](server/tests/hybridSearch.test.ts) | **New.** 9 tests: spotting names, ignoring English, merging, when keyword search runs, folder filter, fallback |
+| [server/tests/vectorStore.test.ts](server/tests/vectorStore.test.ts) | 3 tests on a real temporary LanceDB table: whole-name matching, case, folder filter, index built on first use for old tables |
+
+**How to demo:** Chat → ask *"Where is `formatChunk` used?"* → open *Sources*: `rag.ts`, `report.ts` and the tests that use it. Then ask a plain question to show nothing else changed.
