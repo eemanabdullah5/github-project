@@ -92,6 +92,9 @@ How each one works is written up under [Implementation notes](#implementation-no
 | Org repo access | Claude Code | Blocked on the senior decision about tokens (D15). |
 | Names in the knowledge map | Opus | Needs senior / HR approval. |
 | Evaluation auto mode (`npm run eval -- --auto owner/repo`) | Claude Code | Generate ~20 test questions for any indexed repo (exact-name ones from function names, plain ones with Gemini) and save them to `questions.json` for review. Today only the 2 repos with hand-written questions are tested. Agreed to build later. |
+| Answer feedback (👍 / 👎) | Claude Code | Buttons under each answer, saved with the chat; shows the share marked helpful and lists the 👎 ones. Measures real answer quality from real use. No AI calls. Suggested first of the three. |
+| Search quality page | Claude Code | A **Quality** tab showing the latest `npm run eval` scores and misses in the browser instead of the terminal. Still measures search, not answers. |
+| Automatic answer grading | Claude Code | A script asks the test questions and has Gemini grade each answer (correct / partly / wrong). About 40–80 chat calls per run; AI grading AI is useful but not fully reliable. |
 
 ## Not planned
 
