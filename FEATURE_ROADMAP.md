@@ -55,7 +55,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 |---|---|---|---|
 | **Verified citations** ✅ Done | Opus | S | After each answer, check that every `[path:Lx-Ly]` citation points to a real file and lines that were retrieved, and flag any that don't. |
 | **Hybrid search** ✅ Done | Opus + Claude Code | S–M | Add LanceDB's built-in full-text search alongside vector search, so exact function and class names are always found. |
-| **Evaluation harness** | Opus | M | Extend [server/scripts/evalRetrieval.ts](server/scripts/evalRetrieval.ts) with 30–50 questions per test repo. Measure file recall@8 and citation validity before and after every retrieval change. |
+| **Evaluation harness** ✅ Done (smaller version) | Opus | M | Extend [server/scripts/evalRetrieval.ts](server/scripts/evalRetrieval.ts) with 30–50 questions per test repo. Measure file recall@8 and citation validity before and after every retrieval change. |
 | **Ask about one folder** ✅ Done | Claude Code | S | Limit a question to a folder or file, such as `src/auth`. |
 
 ## Phase 3 — Deeper understanding (~1.5–2 weeks)
@@ -64,7 +64,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 |---|---|---|---|
 | **Index-time folder summaries** | Opus | M | While indexing, write a short summary of each folder and store it as a searchable document. Big-picture questions then use these summaries. Per folder rather than per file, to stay within Gemini's free-tier limits. |
 | **Saved chat history** ✅ Done | PRD | M | Keep conversations per repo across sessions, in SQLite (`better-sqlite3`). The same database can later hold the code graph. |
-| **Incremental re-index** | Opus + Claude Code | M | Re-embed only files whose content changed since the last index. |
+| **Incremental re-index** ✅ Done | Opus + Claude Code | M | Re-embed only files whose content changed since the last index. |
 | **Usage and cost display** | Claude Code | S | Show the Gemini tokens used per answer and per index. |
 | **Dependency scan** ✅ Done | Claude Code | S–M | Read `package.json`, `requirements.txt`, `go.mod`, `pom.xml` and similar files directly, to give exact dependencies and versions without relying on the AI. |
 
@@ -91,6 +91,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | Branch selection | Claude Code | Useful, but not asked for yet. |
 | Org repo access | Claude Code | Blocked on the senior decision about tokens (D15). |
 | Names in the knowledge map | Opus | Needs senior / HR approval. |
+| Evaluation auto mode (`npm run eval -- --auto owner/repo`) | Claude Code | Generate ~20 test questions for any indexed repo (exact-name ones from function names, plain ones with Gemini) and save them to `questions.json` for review. Today only the 2 repos with hand-written questions are tested. Agreed to build later. |
 
 ## Not planned
 
@@ -597,3 +598,82 @@ The AI is also given the exact list, so its "Tech stack" and "Dependencies" text
 | [web/src/index.css](web/src/index.css) | Panel styles (light and dark themes) |
 
 **How to demo:** ask a question → reload the page → open the repo again: the chat is still there → **New chat** → ask something else → open **Past chats** and switch between the two → tick both → **Delete selected (2)**.
+
+### Incremental re-index ✅ (Phase 3)
+
+**What it does:** **Re-index** only sends **new or changed** chunks to Gemini for embedding. Unchanged chunks keep the vectors they already have. During a re-index the progress panel says, for example, *"186 unchanged chunks reused · embedding only the 390 new or changed"*.
+
+**Why:** embedding is most of the indexing time and all of its Gemini calls. After a few commits, most of the code is exactly the same as last time.
+
+**Measured on github-project:**
+| Re-index | Chunks | Embedded | Reused | Time |
+|---|---|---|---|---|
+| After today's work (old index from `d11cb37`, code grew from 343 to 576 chunks) | 576 | 390 | 186 | 266 s |
+| Again, nothing changed | 576 | **0** | **576** | **6 s**, no Gemini calls |
+
+Embedding all 576 from scratch would take about 6 minutes at the same rate. Search still worked afterwards: *"Where is `deleteConversations` used?"* found exactly the right 5 files.
+
+**How it works** ([server/src/reuseEmbeddings.ts](server/src/reuseEmbeddings.ts)):
+1. Before embedding, the indexer reads the previous index's vectors (`loadSavedVectors()` in [vectorStore.ts](server/src/vectorStore.ts)), keyed by a **fingerprint (SHA-1) of each chunk's text**.
+2. `planEmbedding()` checks each new chunk: same text as before → reuse its vector; otherwise → embed it. `combine()` puts the vectors back in chunk order.
+3. The new table is then built as usual, so deleted code disappears and the keyword index is rebuilt.
+
+**Why match by text, not chunk id:** ids are positions (`app.ts#3`), which shift when code is added above. The vector depends only on the text, so the same text always gets the same vector, even if it moved or the file was renamed.
+
+**Safety:**
+- **Never mixes models:** if the index was made with a different embedding model (e.g. after switching Gemini ↔ Ollama), everything is embedded again, since vectors from two models don't mean the same thing.
+- If the saved vectors can't be read, it embeds everything instead of failing.
+- `combine()` refuses to continue if the AI returned the wrong number of vectors.
+- **Works on existing indexes:** old tables already store the chunk text, so the first re-index after this change could already reuse vectors. No migration needed.
+
+**Known limits:** a one-character edit changes that chunk's fingerprint, so the whole chunk is re-embedded (chunks are small, so this is cheap). The download and chunking steps still run in full; they take a few seconds.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/reuseEmbeddings.ts](server/src/reuseEmbeddings.ts) | **New.** `fingerprint()`, `planEmbedding()` |
+| [server/src/vectorStore.ts](server/src/vectorStore.ts) | New `loadSavedVectors()` |
+| [server/src/indexer.ts](server/src/indexer.ts) | Embeds only what changed; `savedVectorsFor()` checks the model; logs embedded vs reused |
+| [server/src/types.ts](server/src/types.ts), [web/src/api.ts](web/src/api.ts) | `reused` count on the indexing job |
+| [web/src/components/IndexProgress.tsx](web/src/components/IndexProgress.tsx), [web/src/index.css](web/src/index.css) | The "unchanged chunks reused" note |
+| [server/tests/reuseEmbeddings.test.ts](server/tests/reuseEmbeddings.test.ts) | **New.** 5 tests: fingerprints, moved chunks, first index, nothing changed, wrong vector count |
+| [server/tests/vectorStore.test.ts](server/tests/vectorStore.test.ts) | Reading saved vectors on a real temporary table |
+
+**How to demo:** open a repo → **Re-index** → watch the note *"576 unchanged chunks reused · nothing new to embed"* and the job finish in seconds.
+
+### Evaluation harness ✅ (Phase 2, smaller version)
+
+**What it does:** one command, `npm run eval`, runs fixed test questions against each repo's **real index** and shows how often search finds the file that answers them. Each question is run two ways: **meaning only** (vector search, as before hybrid search) and **hybrid** (what the chat really uses).
+
+**Why:** search changed a lot (hybrid search, folder scope, reused vectors), and each change was checked by hand on a few questions. This gives one number to compare before and after any future change.
+
+**Smaller version (agreed):** 23 questions for github-project and 20 for ai_agent_oop instead of 30–50 each. Less to write and keep up to date. More can be added later.
+
+**How it works:**
+1. [server/eval/questions.json](server/eval/questions.json) holds the questions. Each has a **kind** (`plain` English, `name` = names something in the code, `folder` = uses "Search in") and the file(s) that answer it. Finding any of them counts.
+2. [server/scripts/evalSearch.ts](server/scripts/evalSearch.ts) embeds each question once, runs both searches, and records where the right file first appears (#1 = top).
+3. It prints one line per question, then a summary per kind: **found** (right file in the top 8, the chunks the AI is given) and **top 3**, plus what came up instead for every miss.
+4. **Spots out-of-date questions:** if a question's expected file isn't in the index any more (the code moved), it says so, so a stale question isn't mistaken for a search failure.
+5. **Read-only** and cheap: one small Gemini embedding per question (43 in total), no chat calls, under a minute. Retries if Gemini is busy.
+
+**First results:**
+| Repo | Found (meaning only) | Found (hybrid) | Top 3 (hybrid) |
+|---|---|---|---|
+| github-project (23) | 23/23 (100%) | 23/23 (100%) | 21/23 (91%) |
+| ai_agent_oop (20) | 17/20 (85%) | 17/20 (85%) | 14/20 (70%) |
+
+**What the results show:**
+- **github-project:** every question found its file. Hybrid moved one exact-name question up (`MIN_CO_CHANGES`: #2 → #1). The other name questions were already #1, because chunk headers include function names.
+- **ai_agent_oop, the 3 misses:** two ("What happens if an agent is given an empty name?", "What does `get_last_memory` return when memory is empty?") found the **tests** for that behaviour instead of `agents.py`. Half of the 8 result slots were **exact duplicate copies**: every file exists twice, in the root and in `Final_submission/`. The third ("How do I set up and run this project?") found `demo.py` instead of the README.
+- **Hybrid isn't always better:** on ai_agent_oop it moved two class-name questions down (`ChatbotAgent` #3 → #7, `RecommenderAgent` #1 → #3), because the test files mention those class names many times, and one up (`has_api_key` #5 → #3). All were still found. This is the kind of trade-off the evaluation exists to show.
+
+**Follow-up idea, found by the evaluation:** **drop duplicate chunks from search results** (same text in two files: keep one). In ai_agent_oop that would free about half the result slots and likely fix the two test-file misses. Small, and measurable with `npm run eval`.
+
+**How to use it:** after any change to search or chunking, run `npm run eval` (or `npm run eval -- eemanabdullah5/ai_agent_oop` for one repo) and compare with the table above. If code moves, update that question's `expect` in `questions.json`.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/eval/questions.json](server/eval/questions.json) | **New.** 43 questions with their expected files |
+| [server/scripts/evalSearch.ts](server/scripts/evalSearch.ts) | **New.** Runs them on the real index, meaning-only vs hybrid, and prints the results |
+| [package.json](package.json), [server/package.json](server/package.json) | `npm run eval` |

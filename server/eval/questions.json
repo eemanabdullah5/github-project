@@ -1,0 +1,58 @@
+{
+  "about": "Test questions for the search evaluation (server/scripts/evalSearch.ts). Each question lists the file(s) that answer it: finding any one of them in the top 8 counts as found. kind: plain = plain English, name = names something in the code, folder = uses 'Search in'. If code moves, update 'expect'.",
+  "repos": [
+    {
+      "repo": "eemanabdullah5/github-project",
+      "questions": [
+        { "kind": "plain", "q": "How are secrets kept out of the index?", "expect": ["server/src/ingestion.ts"] },
+        { "kind": "plain", "q": "How does the app decide if an index is out of date?", "expect": ["server/src/indexer.ts"] },
+        { "kind": "plain", "q": "How are answers streamed to the browser word by word?", "expect": ["server/src/app.ts", "web/src/api.ts"] },
+        { "kind": "plain", "q": "How is a follow-up question rewritten before searching?", "expect": ["server/src/rag.ts"] },
+        { "kind": "plain", "q": "How is the hotspot score calculated?", "expect": ["server/src/gitHistory.ts", "server/src/complexity.ts"] },
+        { "kind": "plain", "q": "How does the app find circular imports between folders?", "expect": ["server/src/architecture.ts"] },
+        { "kind": "plain", "q": "How is source code cut into chunks?", "expect": ["server/src/chunking/syntaxChunker.ts", "server/src/chunking/lineChunker.ts", "server/src/chunking/index.ts"] },
+        { "kind": "plain", "q": "How does the app check that citations point to code the AI was shown?", "expect": ["web/src/citations.ts"] },
+        { "kind": "plain", "q": "How does the app switch between Gemini and Ollama?", "expect": ["server/src/llm.ts"] },
+        { "kind": "plain", "q": "How are saved chats written to disk safely?", "expect": ["server/src/chatHistory.ts"] },
+        { "kind": "name", "q": "Where is `formatChunk` used?", "expect": ["server/src/rag.ts", "server/src/report.ts"] },
+        { "kind": "name", "q": "What does mergeRoundRobin do?", "expect": ["server/src/report.ts"] },
+        { "kind": "name", "q": "Where is resolveScope defined?", "expect": ["server/src/scope.ts"] },
+        { "kind": "name", "q": "What does isSecretFile check?", "expect": ["server/src/ingestion.ts"] },
+        { "kind": "name", "q": "Where is MIN_CO_CHANGES set?", "expect": ["server/src/config.ts"] },
+        { "kind": "name", "q": "What does readPomXml return?", "expect": ["server/src/dependencies.ts"] },
+        { "kind": "name", "q": "How does findHiddenCoupling decide a pair is hidden?", "expect": ["server/src/coupling.ts"] },
+        { "kind": "name", "q": "What does linkCitations do?", "expect": ["web/src/sourceLinks.ts"] },
+        { "kind": "name", "q": "Where is `codeNames` used?", "expect": ["server/src/hybridSearch.ts"] },
+        { "kind": "name", "q": "What does deleteConversations return?", "expect": ["server/src/chatHistory.ts"] },
+        { "kind": "folder", "scope": "server/src/chunking", "q": "How are languages detected?", "expect": ["server/src/chunking/languages.ts"] },
+        { "kind": "folder", "scope": "web/src", "q": "How does the chat show where a question searched?", "expect": ["web/src/views/Chat.tsx"] },
+        { "kind": "folder", "scope": "server/tests", "q": "How are saved chats tested?", "expect": ["server/tests/chatHistory.test.ts"] }
+      ]
+    },
+    {
+      "repo": "eemanabdullah5/ai_agent_oop",
+      "questions": [
+        { "kind": "plain", "q": "How does an agent stop its memory being changed from outside?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "plain", "q": "What happens if an agent is given an empty name?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "plain", "q": "How is the API key kept private?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "plain", "q": "How does the recommender find matching items?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "plain", "q": "How does the vision agent detect objects in an image?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "plain", "q": "How do different agents respond to the same message?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "plain", "q": "What does the demo script show?", "expect": ["demo.py", "Final_submission/demo.py"] },
+        { "kind": "plain", "q": "How do I set up and run this project?", "expect": ["README.md", "Final_submission/README.md"] },
+        { "kind": "plain", "q": "Which test checks that the abstract agent can't be created?", "expect": ["tests/test_polymorphism.py", "Final_submission/test_polymorphism.py"] },
+        { "kind": "plain", "q": "Where is the sample catalog for the recommender tests?", "expect": ["tests/test_subclasses.py", "Final_submission/test_subclasses.py"] },
+        { "kind": "name", "q": "What does get_last_memory return when memory is empty?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "name", "q": "Where is run_all_agents used?", "expect": ["agents.py", "Final_submission/agents.py", "demo.py", "Final_submission/demo.py", "tests/test_polymorphism.py", "Final_submission/test_polymorphism.py"] },
+        { "kind": "name", "q": "What does ChatbotAgent add to the description?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "name", "q": "How does RecommenderAgent copy its catalog?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "name", "q": "What does test_memory_cannot_be_modified_from_outside check?", "expect": ["tests/test_agents.py", "Final_submission/test_agents.py"] },
+        { "kind": "name", "q": "What is `known_labels` used for?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "name", "q": "What does has_api_key do?", "expect": ["agents.py", "Final_submission/agents.py"] },
+        { "kind": "folder", "scope": "tests", "q": "How is agent memory tested?", "expect": ["tests/test_agents.py"] },
+        { "kind": "folder", "scope": "tests", "q": "How are the vision agent's labels tested?", "expect": ["tests/test_subclasses.py"] },
+        { "kind": "folder", "scope": "Final_submission", "q": "Where is the base agent class defined?", "expect": ["Final_submission/agents.py"] }
+      ]
+    }
+  ]
+}
