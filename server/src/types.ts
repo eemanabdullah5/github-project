@@ -142,8 +142,24 @@ export interface HistoryReport {
   reachedLimit: boolean; // true if there were more than MAX_COMMITS commits, so only the newest were used
   filesChanged: number; // how many current files changed in total (the list below shows only the top 100)
   files: HotspotFile[];
-  coChange: CoChangePair[];
+  coChange: CoChangePair[]; // the top pairs, shown in the Hotspots tab
+  // Every pair that changed together often enough (up to MAX_COUPLING_CANDIDATES), for hidden coupling (coupling.ts).
+  // Missing in history saved before hidden coupling was added; then only `coChange` can be checked.
+  coChangeAll?: CoChangePair[];
   areas: AreaStats[];
+}
+
+// Phase 4: two code files that keep changing together but don't import each other (coupling.ts).
+export interface HiddenCouplingPair extends CoChangePair {
+  // "none" = no import path between them at all; "indirect" = linked only through other files (see `via`)
+  link: "none" | "indirect";
+  via: string[]; // for "indirect": the shortest import chain from one file to the other, both ends included
+}
+
+export interface HiddenCoupling {
+  pairsChecked: number; // pairs of code files that changed together often enough
+  pairs: HiddenCouplingPair[]; // the ones with no direct import, "none" first
+  partial: boolean; // true if the history was saved before this feature, so only the top pairs could be checked
 }
 
 // ---------- Phase 4: import graph ----------

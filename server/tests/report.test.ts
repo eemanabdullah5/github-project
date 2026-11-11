@@ -205,4 +205,24 @@ describe("architectureSection (Phase 4 architecture map)", () => {
     expect(architectureSection(null)).toBe("");
     expect(architectureSection(buildArchitecture({ ...graph, files: [], edges: [] }, null))).toBe("");
   });
+
+  it("lists hidden coupling when the history was analysed, and leaves it out when it wasn't", () => {
+    const history = {
+      repoId: "o/r", commitSha: "abc", generatedAt: "", since: "", commitsAnalyzed: 10,
+      skipped: { merges: 0, bots: 0, large: 0 }, reachedLimit: false, filesChanged: 3, files: [], areas: [],
+      coChange: [],
+      coChangeAll: [
+        { a: "app/a.py", b: "lib/b.py", count: 5, percent: 80 }, // imports each other: not listed
+        { a: "app/a.py", b: "main.py", count: 4, percent: 50 }, // main imports a: not listed
+        { a: "lib/b.py", b: "main.py", count: 3, percent: 60 }, // main → a → b: indirect
+      ],
+    } satisfies HistoryReport;
+    const text = architectureSection(buildArchitecture(graph, history));
+    expect(text).toContain("**Hidden coupling**");
+    expect(text).toContain("- `lib/b.py` and `main.py`: changed together 3 times (60%), linked only through `app/a.py`");
+    expect(architectureSection(buildArchitecture(graph, null))).not.toContain("Hidden coupling");
+
+    const allLinked = { ...history, coChangeAll: history.coChangeAll.slice(0, 2) };
+    expect(architectureSection(buildArchitecture(graph, allLinked))).toContain("None: all 2 pairs of code files");
+  });
 });

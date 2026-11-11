@@ -28,6 +28,9 @@ const HISTORY_DIR = path.join(DATA_DIR, "history");
 // How many files and file pairs the report lists at most.
 const MAX_REPORT_FILES = 100;
 const MAX_CO_CHANGE_PAIRS = 10;
+// How many pairs are kept for hidden coupling (coupling.ts). More than the 10 shown, because the pairs that
+// change together most often usually import each other, so the hidden ones can be further down the list.
+const MAX_COUPLING_CANDIDATES = 200;
 
 // What we save on disk for each repo: the commits (reused next time) and the latest report.
 interface HistoryFile {
@@ -173,7 +176,7 @@ export function computeReport(
       }
     }
   }
-  const coChange: CoChangePair[] = [...pairCounts]
+  const coChangeAll: CoChangePair[] = [...pairCounts]
     .filter(([, count]) => count >= MIN_CO_CHANGES) // only pairs that changed together often enough
     .map(([key, count]) => {
       const [a, b] = key.split("\n");
@@ -181,8 +184,10 @@ export function computeReport(
       const fewer = Math.min(perFile.get(a)!.changes, perFile.get(b)!.changes);
       return { a, b, count, percent: Math.round((100 * count) / fewer) };
     })
-    .sort((x, y) => y.count - x.count || y.percent - x.percent)
-    .slice(0, MAX_CO_CHANGE_PAIRS);
+    // Ties: by file names, so the list is the same every time.
+    .sort((x, y) => y.count - x.count || y.percent - x.percent || x.a.localeCompare(y.a) || x.b.localeCompare(y.b))
+    .slice(0, MAX_COUPLING_CANDIDATES);
+  const coChange = coChangeAll.slice(0, MAX_CO_CHANGE_PAIRS);
 
   // 4. Knowledge risk: group files by their top-level folder and count the people per folder.
   const perArea = new Map<string, { commits: Set<string>; authors: Set<string>; files: Set<string> }>();
@@ -217,6 +222,7 @@ export function computeReport(
     filesChanged: rows.length, // the real total, before cutting the list to the top 100
     files: rows.slice(0, MAX_REPORT_FILES),
     coChange,
+    coChangeAll,
     areas,
   };
 }

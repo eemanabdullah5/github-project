@@ -261,6 +261,23 @@ export interface ArchitectureMap {
   coverage: number | null;
   hotspotsAnalysed: boolean;
   mermaid: string;
+  hiddenCoupling: HiddenCoupling | null; // null if the history hasn't been analysed
+}
+
+// Phase 4: code files that change together but don't import each other (server/src/coupling.ts).
+export interface HiddenCouplingPair {
+  a: string;
+  b: string;
+  count: number; // commits that changed both
+  percent: number; // count as a % of the changes to the less-changed file
+  link: "none" | "indirect"; // no import path at all, or only through other files
+  via: string[]; // for "indirect": the shortest import chain, both ends included
+}
+
+export interface HiddenCoupling {
+  pairsChecked: number;
+  pairs: HiddenCouplingPair[];
+  partial: boolean; // history saved before this feature: only the top pairs were checked
 }
 
 // Phase 4: the architecture map. Built from the import graph (a few seconds the first time for older indexes).

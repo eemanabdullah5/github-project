@@ -150,6 +150,8 @@ export function toSources(chunks: Chunk[]): Source[] {
 /**
  * Answers a question about an indexed repo.
  * Returns the sources right away and the answer as a stream of text pieces.
+ *  function that builds what goes to the chat model. 
+ * It vectorises only the question, not the code
  */
 export async function answer(
   repoId: string,

@@ -223,7 +223,25 @@ export function architectureSection(map: ArchitectureMap | null): string {
   } else {
     lines.push("", "No cycles: dependencies between folders all go one way.");
   }
+  lines.push(...hiddenCouplingLines(map));
   return lines.join("\n");
+}
+
+// The "Hidden coupling" part of the architecture section: files that change together without importing each other.
+// Nothing is written if the history wasn't analysed or no code files change together often enough.
+export function hiddenCouplingLines(map: ArchitectureMap): string[] {
+  const hc = map.hiddenCoupling;
+  if (!hc || hc.pairsChecked === 0) return [];
+  const lines = ["", "**Hidden coupling** (code files that keep changing together but don't import each other):", ""];
+  if (hc.pairs.length === 0) {
+    lines.push(`None: all ${plural(hc.pairsChecked, "pair")} of code files that often change together are linked by an import.`);
+  }
+  for (const p of hc.pairs) {
+    const how = p.link === "none" ? "no import link at all" : `linked only through ${p.via.slice(1, -1).map((f) => `\`${f}\``).join(" → ")}`;
+    lines.push(`- \`${p.a}\` and \`${p.b}\`: changed together ${plural(p.count, "time")} (${p.percent}%), ${how}`);
+  }
+  if (hc.partial) lines.push("", "_Only the top pairs were checked. Run Analyse history again to check them all._");
+  return lines;
 }
 
 // Merges the search results of all sections fairly: first every section's best chunk, then every

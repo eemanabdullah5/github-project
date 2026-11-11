@@ -6,8 +6,10 @@
 //  3. Cycles are found: modules (or files) that depend on each other in a loop, a common design problem.
 //  4. If the git history was analysed (F4), each module is coloured by its top hotspot's score.
 //  5. The result is also written as a Mermaid diagram, which the web app draws and GitHub shows in Markdown.
+//  6. If the history was analysed, hidden coupling is added: files that change together without importing each other (coupling.ts).
 import path from "node:path";
-import type { HistoryReport, ImportEdge, ImportGraph } from "./types.js";
+import { findHiddenCoupling } from "./coupling.js";
+import type { HiddenCoupling, HistoryReport, ImportEdge, ImportGraph } from "./types.js";
 
 /** Most boxes the diagram shows. More than this gets hard to read, so folders are grouped less deeply. */
 export const MAX_MODULES = 20;
@@ -45,6 +47,7 @@ export interface ArchitectureMap {
   coverage: number | null; // from the import graph: share of internal-looking imports that were followed
   hotspotsAnalysed: boolean; // false if F4 hasn't been run, so modules aren't coloured
   mermaid: string; // the diagram as Mermaid text
+  hiddenCoupling: HiddenCoupling | null; // files that change together without importing each other; null if F4 hasn't been run
 }
 
 /** The folder a file is in, cut to `depth` levels. Files at the top of the repo are in "(root)". */
@@ -213,5 +216,6 @@ export function buildArchitecture(graph: ImportGraph, history: HistoryReport | n
     coverage: internal === 0 ? null : graph.stats.internal / internal,
     hotspotsAnalysed: history !== null,
     mermaid: toMermaid(modules, links),
+    hiddenCoupling: history && findHiddenCoupling(graph, history),
   };
 }

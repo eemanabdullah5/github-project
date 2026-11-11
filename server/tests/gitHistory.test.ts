@@ -85,6 +85,17 @@ describe("computeReport", () => {
 
   it("lists files that changed together at least 3 times", () => {
     expect(report.coChange).toEqual([{ a: "src/billing.ts", b: "src/util.ts", count: 3, percent: 100 }]);
+    expect(report.coChangeAll).toEqual(report.coChange); // the full list for hidden coupling (only 1 pair here)
+  });
+
+  it("shows the top 10 pairs but keeps more for hidden coupling", () => {
+    // 12 files, all changed together in 3 commits → 66 pairs, each changed together 3 times.
+    const many = Array.from({ length: 12 }, (_, i) => `m/f${i}.ts`);
+    const manyFiles = many.map((p) => file(p, "x"));
+    const r = computeReport(["x1", "x2", "x3"].map((sha) => commit(sha, "alice", many)), manyFiles, meta);
+    expect(r.coChange).toHaveLength(10);
+    expect(r.coChangeAll).toHaveLength(66);
+    expect(r.coChangeAll!.slice(0, 10)).toEqual(r.coChange);
   });
 
   it("flags folders only one person changed, without storing any names", () => {

@@ -1,6 +1,6 @@
 # FEATURE ROADMAP — GitHub Repository AI Assistant
 
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-11
 **Related:** [PRD.md](PRD.md), [ARCHITECTURE.md](ARCHITECTURE.md), [DECISIONS.md](DECISIONS.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
 
 This file lists the features planned after the MVP, in the order we'll build them, and explains how each finished feature works and where its code lives.
@@ -74,7 +74,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 |---|---|---|---|
 | **Import graph** ✅ Python + JS/TS | Opus | M | Which file imports which, from tree-sitter. Stored as JSON in `data/graphs/` for now (SQLite later). Go and Java still to do. |
 | **Architecture map** ✅ Done | Opus | M–L | A zoomable module diagram with hotspot overlay, plus cycle detection. |
-| **Hidden coupling** | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
+| **Hidden coupling** ✅ Done | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
 | **Call graph** | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
 | **Change impact** | Opus | M | For a changed function: what depends on it, and which tests reach it. |
 | **PR risk briefing** | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
@@ -384,3 +384,41 @@ The same diagram and cycle list are in the **health report** (F5) as a ` ```merm
 
 **How to demo:** open a repo → **Hotspots** → **Analyse history** → **Architecture** → point out the coloured boxes and red arrows → click a cycle's example import to open that line on GitHub → **Report** → **Download .md**.
 
+
+### Hidden coupling ✅ (Phase 4)
+
+**What it does:** finds pairs of code files that keep changing in the same commit but **don't import each other**. Two files usually change together because one uses the other. When there's no import, something the code doesn't show ties them together: copied logic, a shared data format, an API and the code that calls it. Changing only one side can break the other.
+
+Each pair is shown as:
+- **⚠ No import link at all:** the most interesting kind, listed first.
+- **Linked only indirectly:** no direct import, but a chain of imports connects them (e.g. `c.py → util.py → a.py`). The chain is shown.
+
+It appears in the **Architecture** tab (a headline number plus a *Hidden coupling* section with GitHub links to both files) and in the **health report** (F5), under the architecture map.
+
+**How it works** ([server/src/coupling.ts](server/src/coupling.ts)), with no AI:
+1. Takes the "files that change together" pairs from F4 (at least 3 commits together).
+2. Keeps only pairs where **both files are code in the import graph** (Python, JS/TS). A README or JSON file "not importing" anything means nothing.
+3. Drops pairs with a direct import in either direction.
+4. For the rest, `importPath()` looks for the shortest import chain either way (breadth-first search). Found → "indirect"; none → "no link at all".
+5. Sorts "no link" first, then by how often they changed together, and shows the top 10.
+
+**Change to F4:** the saved history used to keep only the top 10 pairs. The pairs that change together most usually import each other, so hidden ones were cut off. It now also keeps every pair (up to 200) in `coChangeAll`; the Hotspots tab still shows the top 10. History saved before this change still works, but only its top 10 can be checked, and the app says *"Run Analyse history again to check them all."*
+
+**Tested on github-project (this app):** with the old top-10 list, 1 hidden pair; with the full list, 6 of 10 code pairs. The top one is `server/src/app.ts` ⇄ `web/src/api.ts` (5 times together, 71%): the server's API routes and the browser code that calls them, tied together only by URLs and data shapes. A real design point: a shared types file would make this link visible.
+
+**Known limits:** only Python and JS/TS (like the import graph). Needs F4 to have been run. Pairs between a source file and its test that don't import each other (e.g. a route and an API test) can show up; they're real links, but less worrying.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/coupling.ts](server/src/coupling.ts) | **New.** `findHiddenCoupling()`, `importPath()` |
+| [server/src/gitHistory.ts](server/src/gitHistory.ts) | Keeps every pair (up to 200) in `coChangeAll`, with a stable order for ties |
+| [server/src/types.ts](server/src/types.ts) | `coChangeAll` on `HistoryReport`; new `HiddenCouplingPair`, `HiddenCoupling` |
+| [server/src/architecture.ts](server/src/architecture.ts) | `hiddenCoupling` added to the architecture map (null if F4 hasn't been run) |
+| [server/src/report.ts](server/src/report.ts) | New `hiddenCouplingLines()`, added to the architecture section |
+| [server/tests/coupling.test.ts](server/tests/coupling.test.ts) | **New.** 7 tests: import chains, circular imports, direct links both ways, only code files, old history, the top-10 limit |
+| [server/tests/gitHistory.test.ts](server/tests/gitHistory.test.ts), [server/tests/report.test.ts](server/tests/report.test.ts) | Tests for the full pair list and the report text |
+| [web/src/api.ts](web/src/api.ts) | Types |
+| [web/src/components/Architecture.tsx](web/src/components/Architecture.tsx) | Headline number and the *Hidden coupling* section |
+
+**How to demo:** open a repo → **Hotspots** → **Analyse history** (run it again on repos analysed before today) → **Architecture** → scroll to *Hidden coupling* → click both files → **Report** → **Regenerate** to see it in the report.

@@ -1,7 +1,8 @@
 // Phase 4 — Architecture tab.
 // Shows how the repo is put together, from the import graph (no AI):
 //  1. headline numbers   2. module map (Mermaid diagram, hotspot colours, red arrows for cycles)
-//  3. cycles: modules or files that depend on each other in a loop   4. table of modules
+//  3. cycles: modules or files that depend on each other in a loop
+//  4. hidden coupling: files that change together without importing each other   5. table of modules
 import { AlertCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getArchitecture, type ArchitectureMap, type ArchLink, type Repo } from "../api";
@@ -80,6 +81,13 @@ export default function Architecture({ repo }: Props) {
         <Stat label="Imports between modules" value={importCount} />
         <Stat label="Module cycles" value={map.cycles.length} warn={map.cycles.length ? "loops between folders" : undefined} />
         <Stat label="Circular file imports" value={map.fileCycles.length} warn={map.fileCycles.length ? "files importing each other" : undefined} />
+        {map.hiddenCoupling && (
+          <Stat
+            label="Hidden coupling"
+            value={map.hiddenCoupling.pairs.length}
+            warn={map.hiddenCoupling.pairs.length ? "change together, no import" : undefined}
+          />
+        )}
       </div>
 
       {/* 2. The map */}
@@ -141,7 +149,10 @@ export default function Architecture({ repo }: Props) {
         </section>
       )}
 
-      {/* 4. Modules table */}
+      {/* 4. Hidden coupling */}
+      <HiddenCouplingSection map={map} fileUrl={(path) => lineUrl(path, 1).replace(/#L1$/, "")} />
+
+      {/* 5. Modules table */}
       <section className="section" aria-labelledby="arch-modules">
         <div className="section-head">
           <h2 id="arch-modules">Modules</h2>
@@ -189,6 +200,64 @@ export default function Architecture({ repo }: Props) {
         </div>
       </section>
     </div>
+  );
+}
+
+/** Files that keep changing together but don't import each other. Needs the history from the Hotspots tab. */
+function HiddenCouplingSection({ map, fileUrl }: { map: ArchitectureMap; fileUrl: (path: string) => string }) {
+  const hc = map.hiddenCoupling;
+  const fileLink = (path: string) => (
+    <a href={fileUrl(path)} target="_blank" rel="noopener noreferrer">
+      <code>{path}</code>
+    </a>
+  );
+  let body;
+  if (!hc) {
+    body = <p className="muted">Run Analyse history in the Hotspots tab to find files that change together without importing each other.</p>;
+  } else if (hc.pairsChecked === 0) {
+    body = <p className="muted">No code files changed together often enough (at least 3 commits) to check.</p>;
+  } else if (hc.pairs.length === 0) {
+    body = (
+      <p className="muted">
+        None found: all {hc.pairsChecked} pair{hc.pairsChecked === 1 ? "" : "s"} of code files that often change together are linked by an import.
+      </p>
+    );
+  } else {
+    body = (
+      <div className="card arch-cycles">
+        {hc.pairs.map((p) => (
+          <div key={`${p.a}\n${p.b}`} className="cycle">
+            <p>
+              {p.link === "none" && <strong>⚠ </strong>}
+              {fileLink(p.a)} ⇄ {fileLink(p.b)}
+            </p>
+            <p className="muted small">
+              Changed together {p.count} time{p.count === 1 ? "" : "s"} ({p.percent}%) ·{" "}
+              {p.link === "none" ? (
+                "no import link at all"
+              ) : (
+                <>
+                  linked only through <code>{p.via.slice(1, -1).join(" → ")}</code>
+                </>
+              )}
+            </p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <section className="section" aria-labelledby="arch-coupling">
+      <div className="section-head">
+        <h2 id="arch-coupling">Hidden coupling</h2>
+        <p>
+          Code files that keep changing in the same commit but don't import each other. Something the code doesn't show ties
+          them together, such as copied logic or a shared data format, so changing only one side can break the other.
+        </p>
+      </div>
+      {body}
+      {hc?.partial && <p className="muted small">Only the top pairs were checked. Run Analyse history again to check them all.</p>}
+    </section>
   );
 }
 
