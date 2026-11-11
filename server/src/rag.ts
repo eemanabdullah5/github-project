@@ -1,6 +1,7 @@
 // RAG — "retrieval-augmented generation" (ARCHITECTURE §10). Answers a question about a repo:
 //  1. If there is chat history, rewrite a follow-up ("where is that called?") into a full question.
-//  2. Turn the question into a vector and fetch the 8 closest code chunks.
+//  2. Turn the question into a vector and fetch the 8 closest code chunks (only from one folder or file,
+//     if the user picked one: Phase 2 "Ask about one folder", see scope.ts).
 //  3. Build a prompt: rules + README/file tree + chunks + recent history + the question.
 //  4. Stream the model's answer back, with the list of sources.
 //  5. F3: after the answer, suggest 3 follow-up questions the user might ask next.
@@ -8,7 +9,8 @@
 import { CHARS_PER_TOKEN, HISTORY_TURNS, MAX_README_TOKENS, MAX_TREE_LINES, NUM_CTX, TOP_K } from "./config.js";
 import { AppError } from "./errors.js";
 import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
-import { DEPTH_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, type AnswerDepth } from "./prompts.js";
+import { DEPTH_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, scopeNote, type AnswerDepth } from "./prompts.js";
+import { resolveScope, scopeFilter, type Scope } from "./scope.js";
 import type { ChatMessage, Chunk, Manifest, Source } from "./types.js";
 import { loadManifest, query } from "./vectorStore.js";
 
@@ -56,11 +58,13 @@ export function buildPrompt(input: {
   chunks: Chunk[]; // best match first
   manifest: Pick<Manifest, "repoId" | "fileTree" | "readme">;
   depth?: AnswerDepth; // F2: answer style. If not given, "technical" is used.
+  scope?: Scope | null; // Phase 2: the folder or file the question is limited to, if any
 }): { messages: ChatTurn[]; usedChunks: Chunk[] } {
   // F2: the main rules, followed by the instructions for the chosen answer style.
   const rules = `${SYSTEM_RULES}\n\n${DEPTH_RULES[input.depth ?? "technical"]}`;
   const repoContext =
     `Repository: ${input.manifest.repoId}\n\n` +
+    (input.scope ? `${scopeNote(input.scope.kind, input.scope.path)}\n\n` : "") +
     `<<<REPO FILE TREE>>>\n${truncateTree(input.manifest.fileTree)}\n<<<END FILE TREE>>>\n\n` +
     `<<<REPO README>>>\n${truncateReadme(input.manifest.readme) || "(no README)"}\n<<<END README>>>`;
   const history = recentHistory(input.history);
@@ -128,11 +132,17 @@ export function parseFollowUps(text: string): string[] {
 // F3: asks the AI for 3 short follow-up questions, based on the last question and its answer.
 // In Executive mode it asks for questions a CTO would ask; in Technical mode, questions a developer would ask.
 // Suggestions are a nice extra, so if anything goes wrong we just return an empty list.
-export async function suggestFollowUps(question: string, answerText: string, depth: AnswerDepth = "technical"): Promise<string[]> {
+// Phase 2: if the question was limited to a folder or file (`scope`), the suggestions stay inside it.
+export async function suggestFollowUps(
+  question: string,
+  answerText: string,
+  depth: AnswerDepth = "technical",
+  scope: Scope | null = null,
+): Promise<string[]> {
   const reader = depth === "executive" ? "a CTO or engineering manager" : "a developer";
   try {
     const reply = await chat([
-      { role: "system", content: followUpsPrompt(reader, MAX_FOLLOW_UPS) }, // prompt text: prompts.ts
+      { role: "system", content: followUpsPrompt(reader, MAX_FOLLOW_UPS, scope) }, // prompt text: prompts.ts
       // Only the first 4,000 characters of the answer are sent, to keep this extra call small and fast.
       { role: "user", content: `Question: ${question}\n\nAnswer:\n${answerText.slice(0, 4000)}` },
     ]);
@@ -158,14 +168,20 @@ export async function answer(
   question: string,
   history: ChatMessage[],
   depth: AnswerDepth = "technical", // F2: answer style chosen in the chat
-): Promise<{ sources: Source[]; tokens: AsyncIterable<string> }> {
+  scopePath = "", // Phase 2: limit the search to this folder or file ("" = the whole repo)
+): Promise<{ sources: Source[]; tokens: AsyncIterable<string>; scope: Scope | null }> {
   const manifest = await loadManifest(repoId);
   if (!manifest) throw new AppError("This repo hasn't been indexed yet. Index it first.", 404);
+  // Checked against the indexed files before anything else, so a bad path fails fast with a clear message.
+  const scope = resolveScope(scopePath, manifest.fileTree);
 
   const searchQuery = await rewriteQuestion(question, history);
   const vector = await embedQuery(searchQuery);
-  const chunks = await query(repoId, vector, TOP_K);
-  const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth });
+  const chunks = await query(repoId, vector, TOP_K, scope ? scopeFilter(scope) : undefined);
+  // A file in the index with no chunks (e.g. an empty file): say so instead of answering from nothing.
+  if (scope && chunks.length === 0) throw new AppError(`There's no indexed code in "${scope.path}" to answer from.`, 400);
+  const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope });
 
-  return { sources: toSources(usedChunks), tokens: chatStream(messages) };
+  // `scope` is returned checked and tidied, so the follow-up suggestions can stay inside the same folder.
+  return { sources: toSources(usedChunks), tokens: chatStream(messages), scope };
 }

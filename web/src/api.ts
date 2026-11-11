@@ -20,7 +20,15 @@ export type IndexStatus = "missing" | "fresh" | "stale";
 
 export interface StatusResponse {
   status: IndexStatus;
-  manifest: { commitSha: string; branch: string; indexedAt: string; fileCount: number; chunkCount: number } | null;
+  manifest: {
+    commitSha: string;
+    branch: string;
+    indexedAt: string;
+    fileCount: number;
+    chunkCount: number;
+    folders: string[]; // Phase 2: folders with indexed files, for the "Ask about one folder" picker
+    files: string[]; // … and the indexed files themselves
+  } | null;
 }
 
 export interface IndexJob {
@@ -86,6 +94,7 @@ export interface ChatMessage {
   content: string;
   sources?: Source[];
   followUps?: string[]; // F3: suggested next questions, shown as buttons under the latest answer
+  scope?: string; // Phase 2: on a question, the folder or file it was limited to (shown as a tag)
 }
 
 /**
@@ -189,6 +198,7 @@ export async function streamChat(
   question: string,
   history: ChatMessage[],
   depth: AnswerDepth, // F2: the answer style chosen with the toggle
+  scope: string, // Phase 2: the folder or file to search in, or "" for the whole repo
   handlers: {
     onSources: (sources: Source[]) => void;
     onToken: (text: string) => void;
@@ -201,7 +211,7 @@ export async function streamChat(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // F2: depth is sent with every question, so the server knows which answer style to use.
-      body: JSON.stringify({ question, depth, history: history.map(({ role, content }) => ({ role, content })) }),
+      body: JSON.stringify({ question, depth, scope, history: history.map(({ role, content }) => ({ role, content })) }),
     });
   } catch {
     throw new Error("Can't reach the server. Is it running? (npm run dev)");

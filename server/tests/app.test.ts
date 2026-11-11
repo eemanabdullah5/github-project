@@ -28,12 +28,14 @@ vi.mock("../src/rag.js", () => ({
       yield "Hello";
       yield " world";
     })(),
+    // Phase 2: rag returns the checked scope; here, whatever was asked for, as a folder.
+    scope: _args[4] ? { kind: "folder", path: String(_args[4]) } : null,
   })),
 }));
 
 const { createApp } = await import("../src/app.js");
 const { listAccessibleRepos } = await import("../src/githubClient.js");
-const { answer } = await import("../src/rag.js");
+const { answer, suggestFollowUps } = await import("../src/rag.js");
 
 let server: Server;
 let baseUrl: string;
@@ -116,6 +118,24 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
     expect(vi.mocked(answer).mock.lastCall?.[3]).toBe("executive");
     await ask("something-else");
     expect(vi.mocked(answer).mock.lastCall?.[3]).toBe("technical");
+  });
+
+  // Phase 2: the folder picked in the chat reaches rag.answer() (5th argument). Anything that isn't text is ignored.
+  it("passes the scope to rag, and treats a missing or non-text scope as the whole repo", async () => {
+    const ask = (body: object) =>
+      fetch(`${baseUrl}/api/repos/octo/hello/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "hi", ...body }),
+      }).then((r) => r.text());
+    await ask({ scope: "server/src" });
+    expect(vi.mocked(answer).mock.lastCall?.[4]).toBe("server/src");
+    // The follow-up suggestions get the checked scope too (4th argument), so they stay inside the folder.
+    expect(vi.mocked(suggestFollowUps).mock.lastCall?.[3]).toEqual({ kind: "folder", path: "server/src" });
+    await ask({ scope: { evil: true } });
+    expect(vi.mocked(answer).mock.lastCall?.[4]).toBe("");
+    await ask({});
+    expect(vi.mocked(answer).mock.lastCall?.[4]).toBe("");
   });
 
   it("rejects an empty question", async () => {

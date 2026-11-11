@@ -7,8 +7,9 @@
 // F4: a "Hotspots" tab next to the chat shows what the git history says about the repo.
 // F5: a "Report" tab shows a one-page health report that can be downloaded.
 // Phase 4: an "Architecture" tab shows the module map built from the import graph.
+// Phase 2: "Search in" limits a question to one folder or file; each question shows where it searched.
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
-import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, FolderSearch, RefreshCw, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -58,7 +59,11 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const [reindexing, setReindexing] = useState(false);
   const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
   const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
+  const [scope, setScope] = useState(""); // Phase 2: folder or file to search in ("" = the whole repo)
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Phase 2: a folder picked for one repo means nothing in another, so start each repo with the whole repo.
+  useEffect(() => setScope(""), [repo.owner, repo.name]);
 
   /** Loads the index status and commit SHA for the header. */
   function loadStatus() {
@@ -90,9 +95,13 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
     setInput("");
     setError("");
     setBusy(true);
-    setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "", sources: [] }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text, scope: scopePath || undefined },
+      { role: "assistant", content: "", sources: [] },
+    ]);
     try {
-      await streamChat(repo.owner, repo.name, text, history, depth, {
+      await streamChat(repo.owner, repo.name, text, history, depth, scopePath, {
         onSources: (sources) => updateLastMessage((m) => ({ ...m, sources })),
         onToken: (token) => updateLastMessage((m) => ({ ...m, content: m.content + token })),
         // F3: save the suggested questions on the answer, so they show under it.
@@ -126,6 +135,13 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const statusLabel = status ? { fresh: "Up to date", stale: "New commits since indexing", missing: "Not indexed" }[status.status] : "Checking…";
 
   const StatusIcon = status?.status === "fresh" ? Check : status?.status === "stale" ? TriangleAlert : CircleDashed;
+
+  // Phase 2: the picked folder, tidied the same way the server does ("./server/src/" → "server/src").
+  // Checked against the indexed folders and files so a typo is caught before sending. (The server checks again.)
+  const scopePath = scope.trim().replace(/\\/g, "/").replace(/^(?:\.\/|\/)+/, "").replace(/\/+$/, "");
+  const folders = status?.manifest?.folders ?? [];
+  const files = status?.manifest?.files ?? [];
+  const scopeValid = !scopePath || !status?.manifest || folders.includes(scopePath) || files.includes(scopePath);
 
   return (
     <>
@@ -232,7 +248,16 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
               const finished = !(busy && isLatest); // this answer has stopped streaming
               return m.role === "user" ? (
                 <div key={i} className="message user">
-                  <span className="message-label">You</span>
+                  <span className="message-label">
+                    You
+                    {/* Phase 2: where this question searched, if it was limited to a folder or file. */}
+                    {m.scope && (
+                      <span className="scope-tag" title="This question only searched code in here">
+                        <FolderSearch size={12} aria-hidden="true" />
+                        in <code>{m.scope}</code>
+                      </span>
+                    )}
+                  </span>
                   <p>{m.content}</p>
                 </div>
               ) : (
@@ -315,6 +340,45 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
               <span className="depth-hint">{DEPTH_HINTS[depth]}</span>
             </div>
 
+            {/* Phase 2: ask about one folder. Type or pick a folder or file; empty = the whole repo. */}
+            <div className="scope-row">
+              <label htmlFor="scope">
+                <FolderSearch size={14} aria-hidden="true" />
+                Search in
+              </label>
+              <input
+                id="scope"
+                type="text"
+                list="scope-options"
+                placeholder="Whole repo (or pick a folder or file)"
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+                disabled={busy || reindexing}
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={!scopeValid}
+                aria-describedby={scopeValid ? undefined : "scope-error"}
+              />
+              <datalist id="scope-options">
+                {folders.map((f) => (
+                  <option key={`d:${f}`} value={`${f}/`} />
+                ))}
+                {files.map((f) => (
+                  <option key={`f:${f}`} value={f} />
+                ))}
+              </datalist>
+              {scope && (
+                <button type="button" className="ghost" onClick={() => setScope("")} disabled={busy} aria-label="Search the whole repo">
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+              {!scopeValid && (
+                <span id="scope-error" className="scope-error">
+                  Not a folder or file in the index
+                </span>
+              )}
+            </div>
+
             <form
               className="ask-form"
               onSubmit={(e) => {
@@ -334,7 +398,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
                 disabled={reindexing || busy}
                 autoComplete="off"
               />
-              <button type="submit" disabled={busy || reindexing || !input.trim()}>
+              <button type="submit" disabled={busy || reindexing || !input.trim() || !scopeValid}>
                 {busy ? (
                   "Answering…"
                 ) : (

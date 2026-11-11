@@ -60,11 +60,17 @@ export async function saveIndex(repoId: string, chunks: Chunk[], vectors: number
   await writeFile(manifestPath(repoId), JSON.stringify(manifest, null, 2));
 }
 
-/** Returns the k chunks whose vectors are closest to the question's vector, best match first. */
-export async function query(repoId: string, vector: number[], k: number): Promise<Chunk[]> {
+/**
+ * Returns the k chunks whose vectors are closest to the question's vector, best match first.
+ * `where` (optional) is a LanceDB filter applied before the search, e.g. from scopeFilter() in scope.ts,
+ * so a small folder still gets its k best chunks instead of whatever survives a repo-wide top k.
+ */
+export async function query(repoId: string, vector: number[], k: number, where?: string): Promise<Chunk[]> {
   const db = await openDb();
   const table = await db.openTable(tableName(repoId));
-  const rows = await table.vectorSearch(vector).distanceType("cosine").limit(k).toArray();
+  let search = table.vectorSearch(vector).distanceType("cosine");
+  if (where) search = search.where(where);
+  const rows = await search.limit(k).toArray();
   // Return only the Chunk fields (drop the vector and the distance score).
   return rows.map((r) => ({
     id: r.id,

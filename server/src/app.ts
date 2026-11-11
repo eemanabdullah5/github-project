@@ -14,6 +14,7 @@ import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import type { AnswerDepth } from "./prompts.js";
 import { answer, suggestFollowUps } from "./rag.js";
 import { generateReport, loadReport } from "./report.js";
+import { listFolders } from "./scope.js";
 import type { ChatMessage, Repo } from "./types.js";
 
 /** The repo list, kept in memory so we don't ask GitHub again on every page load. */
@@ -59,6 +60,9 @@ export function createApp() {
         indexedAt: manifest.indexedAt,
         fileCount: manifest.fileCount,
         chunkCount: manifest.chunkCount,
+        // Phase 2: for the "Ask about one folder" picker. Files too, so a single file can be picked.
+        folders: listFolders(manifest.fileTree),
+        files: manifest.fileTree.split("\n").filter(Boolean),
       },
     });
   });
@@ -120,7 +124,8 @@ export function createApp() {
     res.json(getJob());
   });
 
-  // Chat: body is { question, history, depth }. Streams the answer as Server-Sent Events in this order:
+  // Chat: body is { question, history, depth, scope }. `scope` (optional) limits the search to a folder or file;
+  // it's checked against the indexed files in rag.ts. Streams the answer as Server-Sent Events in this order:
   // "sources", then many "token", then "followups" (F3), then "done". Or "error" if something fails.
   app.post("/api/repos/:owner/:repo/chat", async (req, res) => {
     const { owner, repo } = repoParams(req);
@@ -128,6 +133,7 @@ export function createApp() {
     const history: ChatMessage[] = Array.isArray(req.body?.history) ? req.body.history : [];
     // F2: the answer style from the toggle. Anything other than "executive" (even a typo) means "technical".
     const depth: AnswerDepth = req.body?.depth === "executive" ? "executive" : "technical";
+    const scope = typeof req.body?.scope === "string" ? req.body.scope : ""; // Phase 2: "" = the whole repo
     if (!question) throw new AppError("Please type a question.", 400);
 
     res.writeHead(200, {
@@ -142,7 +148,7 @@ export function createApp() {
     res.on("close", () => (closed = true));
 
     try {
-      const { sources, tokens } = await answer(toRepoId(owner, repo), question, history, depth);
+      const { sources, tokens, scope: checkedScope } = await answer(toRepoId(owner, repo), question, history, depth, scope);
       send("sources", sources);
       let answerText = ""; // F3: keep a copy of the full answer, to base the follow-up questions on
       for await (const token of tokens) {
@@ -151,7 +157,8 @@ export function createApp() {
         send("token", token);
       }
       // F3: once the answer is complete, send 3 suggested follow-up questions (skipped if the user left).
-      if (!closed) send("followups", await suggestFollowUps(question, answerText, depth));
+      // Phase 2: if a folder or file was picked, the suggestions are about it too.
+      if (!closed) send("followups", await suggestFollowUps(question, answerText, depth, checkedScope));
       send("done", {});
     } catch (err) {
       send("error", { error: userMessage(err) });

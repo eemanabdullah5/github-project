@@ -56,7 +56,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Verified citations** ✅ Done | Opus | S | After each answer, check that every `[path:Lx-Ly]` citation points to a real file and lines that were retrieved, and flag any that don't. |
 | **Hybrid search** | Opus + Claude Code | S–M | Add LanceDB's built-in full-text search alongside vector search, so exact function and class names are always found. |
 | **Evaluation harness** | Opus | M | Extend [server/scripts/evalRetrieval.ts](server/scripts/evalRetrieval.ts) with 30–50 questions per test repo. Measure file recall@8 and citation validity before and after every retrieval change. |
-| **Ask about one folder** | Claude Code | S | Limit a question to a folder or file, such as `src/auth`. |
+| **Ask about one folder** ✅ Done | Claude Code | S | Limit a question to a folder or file, such as `src/auth`. |
 
 ## Phase 3 — Deeper understanding (~1.5–2 weeks)
 
@@ -422,3 +422,38 @@ It appears in the **Architecture** tab (a headline number plus a *Hidden couplin
 | [web/src/components/Architecture.tsx](web/src/components/Architecture.tsx) | Headline number and the *Hidden coupling* section |
 
 **How to demo:** open a repo → **Hotspots** → **Analyse history** (run it again on repos analysed before today) → **Architecture** → scroll to *Hidden coupling* → click both files → **Report** → **Regenerate** to see it in the report.
+
+### Ask about one folder ✅ (Phase 2)
+
+**What it does:** a **Search in** box above the question box. Type or pick a folder (`server/src/`) or a single file (`web/src/api.ts`), and the next question only searches code inside it. Leave it empty to search the whole repo, as before. Each question shows a small *"in server/src"* tag, so it's clear afterwards where an answer came from.
+
+**Why:** search gives the AI only the 8 best-matching chunks. In a big repo, a question about one area can pull in look-alike code from elsewhere. Limiting the search means all 8 chunks are about the area you care about. It also fits with Hotspots and Hidden coupling: spot a risky area there, then ask about just that folder.
+
+**How it works:**
+1. The picker's list comes from the index status: every folder that holds an indexed file, plus the files themselves (`listFolders()`).
+2. The chat sends `{ question, depth, scope }`. The server tidies the path (`./server/src/` → `server/src`) and **checks it against the indexed files** (`resolveScope()`). Anything else, like a typo or `../../etc`, is rejected with *"… isn't a folder or file in this repo's index."* The browser runs the same check first and greys out Send, so this rarely reaches the server.
+3. The search uses a LanceDB filter: `starts_with(path, 'server/src/')` for a folder, `path = '…'` for a file. `starts_with` is an exact prefix match. We didn't use SQL `LIKE`, because `_` is a wildcard there and folder names often contain it (`ai_agent_oop`). Quotes are escaped. The filter runs **before** the vector search, so a small folder still gets its 8 best chunks.
+4. The AI is told: *"The user limited this question to the folder "server/src"… Focus your answer on this folder."* (`scopeNote()` in `prompts.ts`).
+5. If a file is in the index but has no chunks (e.g. empty), the app says so instead of answering from nothing.
+
+**Tested on github-project (Gemini):** scoped to `server/src/chunking/` → all 8 sources from that folder, answer only about chunking. Scoped to `web/src/api.ts` → all 8 sources from that file. `../../etc` → rejected with the message above.
+
+**Follow-up suggestions stay in the folder (added after testing):** at first, the "Ask next" questions (F3) were about the whole repo even when a folder was picked, and clicking one asked it with the folder still selected. Now `answer()` returns the checked scope, and `suggestFollowUps()` tells the AI: *"Each must be about the folder "server/src/chunking" and answerable from the code in it."* Tested: scoped to `server/src/chunking`, all 3 suggestions were about chunking; scoped to `web/src/api.ts`, all 3 were about functions and types in that file.
+
+**Known limits:** one folder or file at a time. The scope applies to the search only; the AI still sees the repo's file tree and README for context.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/scope.ts](server/src/scope.ts) | **New.** `normalizeScope()`, `listFolders()`, `resolveScope()`, `scopeFilter()` |
+| [server/src/vectorStore.ts](server/src/vectorStore.ts) | `query()` takes an optional filter |
+| [server/src/rag.ts](server/src/rag.ts) | `answer()` takes the scope, checks it, filters the search. `buildPrompt()` adds the scope note. |
+| [server/src/prompts.ts](server/src/prompts.ts) | New `scopeNote()` |
+| [server/src/app.ts](server/src/app.ts) | Chat route reads `scope`. Status route returns `folders` and `files` for the picker. |
+| [server/tests/scope.test.ts](server/tests/scope.test.ts) | **New.** 9 tests: tidying, folder list, whole-name matching, bad and long paths, filter text, quote escaping |
+| [server/tests/app.test.ts](server/tests/app.test.ts), [server/tests/rag.test.ts](server/tests/rag.test.ts) | The scope reaches `answer()` (non-text values are ignored); the AI is told about the folder |
+| [web/src/api.ts](web/src/api.ts) | `streamChat()` sends `scope`; `folders`/`files` on the status; `scope` on questions |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | The *Search in* box with suggestions, clear button, typo warning, and the tag on each question |
+| [web/src/index.css](web/src/index.css) | Styles for the box and tag |
+
+**How to demo:** open a repo → Chat → in **Search in**, pick `server/src/chunking/` → ask *"How does it split code into chunks?"* → open *Sources*: every file is from that folder → clear the box (×) and ask again to compare.

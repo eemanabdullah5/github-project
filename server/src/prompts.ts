@@ -45,12 +45,25 @@ export const DEPTH_RULES: Record<AnswerDepth, string> = {
 export const REWRITE_QUESTION =
   "Rewrite the user's last question as a standalone search query about the code, using the conversation for context. Reply with the query only.";
 
+// 3b. Phase 2 "Ask about one folder": added to the repo context when the user limited the question to a folder or file.
+export function scopeNote(kind: "folder" | "file", scopePath: string): string {
+  return (
+    `The user limited this question to the ${kind} "${scopePath}". All retrieved code chunks come from it. ` +
+    `Focus your answer on this ${kind}; mention other parts of the repo only to explain how they connect to it.`
+  );
+}
+
 // 4. F3: asks for suggested next questions.
 // `reader` is who they're for ("a CTO or engineering manager" or "a developer"), `count` is how many (3).
-export function followUpsPrompt(reader: string, count: number): string {
+// `scope` (Phase 2): if the question was limited to a folder or file, the suggestions must stay inside it,
+// because clicking one asks it with the same folder still selected.
+export function followUpsPrompt(reader: string, count: number, scope?: { kind: "folder" | "file"; path: string } | null): string {
+  const where = scope
+    ? `Each must be about the ${scope.kind} "${scope.path}" and answerable from the code in it, because the search is limited to it. `
+    : "Each must be answerable from the repository's code. ";
   return (
     `Suggest ${count} short follow-up questions that ${reader} might ask next about this code repository, ` +
-    "based on the question and answer below. Each must be answerable from the repository's code. " +
+    `based on the question and answer below. ${where}` +
     "Reply with one question per line and nothing else."
   );
 }

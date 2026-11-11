@@ -1,7 +1,7 @@
 // Tests for buildPrompt: order, delimiters, history window and the prompt budget.
 import { describe, expect, it } from "vitest";
 import { MAX_TREE_LINES } from "../src/config.js";
-import { DEPTH_RULES, SYSTEM_RULES } from "../src/prompts.js";
+import { DEPTH_RULES, SYSTEM_RULES, followUpsPrompt } from "../src/prompts.js";
 import { buildPrompt, parseFollowUps } from "../src/rag.js";
 import type { ChatMessage, Chunk } from "../src/types.js";
 
@@ -70,6 +70,14 @@ describe("buildPrompt", () => {
     expect(messages[0].content).toContain(DEPTH_RULES.executive);
     expect(messages[0].content).toContain("Do not include code snippets");
   });
+
+  // Phase 2: "Ask about one folder" tells the AI which folder the question is about.
+  it("tells the AI about the chosen folder, and says nothing when the whole repo is searched", () => {
+    const scoped = buildPrompt({ question: "q", history: [], chunks: [], manifest, scope: { kind: "folder", path: "src" } });
+    expect(scoped.messages[0].content).toContain('The user limited this question to the folder "src".');
+    const whole = buildPrompt({ question: "q", history: [], chunks: [], manifest });
+    expect(whole.messages[0].content).not.toContain("limited this question");
+  });
 });
 
 // F3: cleaning the AI's follow-up suggestions
@@ -81,5 +89,16 @@ describe("parseFollowUps", () => {
 
   it("ignores lines that aren't questions, or are too short", () => {
     expect(parseFollowUps("Here are some ideas:\n\nWhat is the entry point?\nok?")).toEqual(["What is the entry point?"]);
+  });
+});
+
+// Phase 2: follow-up suggestions stay inside the folder or file the question was limited to.
+describe("followUpsPrompt", () => {
+  it("asks for questions about the chosen folder, or about the whole repo when there's none", () => {
+    expect(followUpsPrompt("a developer", 3, { kind: "folder", path: "server/src" })).toContain('Each must be about the folder "server/src"');
+    expect(followUpsPrompt("a developer", 3, { kind: "file", path: "web/src/api.ts" })).toContain('the file "web/src/api.ts"');
+    const whole = followUpsPrompt("a developer", 3);
+    expect(whole).toContain("answerable from the repository's code");
+    expect(whole).not.toContain("limited");
   });
 });
