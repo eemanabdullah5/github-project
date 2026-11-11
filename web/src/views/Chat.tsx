@@ -8,16 +8,33 @@
 // F5: a "Report" tab shows a one-page health report that can be downloaded.
 // Phase 4: an "Architecture" tab shows the module map built from the import graph.
 // Phase 2: "Search in" limits a question to one folder or file; each question shows where it searched.
+// Saved chat history: chats are saved per repo. "New chat" starts a fresh one, the bin deletes the one on screen,
+// and "Past chats" opens a saved chat or deletes several at once (components/PastChats.tsx).
 // The messages themselves live in App.tsx, so they are cleared when the user switches repo.
-import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, FolderSearch, RefreshCw, Trash2, TriangleAlert, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, FolderSearch, RefreshCw, SquarePen, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
-import { getStatus, startIndex, streamChat, type AnswerDepth, type ChatMessage, type Repo, type StatusResponse } from "../api";
+import {
+  deleteChat,
+  deleteChats,
+  getChat,
+  getStatus,
+  listChats,
+  startIndex,
+  streamChat,
+  type AnswerDepth,
+  type ChatMessage,
+  type ChatSummary,
+  type Repo,
+  type StatusResponse,
+} from "../api";
 import Architecture from "../components/Architecture";
 import HealthReport from "../components/HealthReport";
 import Hotspots from "../components/Hotspots";
 import IndexProgress from "../components/IndexProgress";
+import { useConfirm } from "../components/ConfirmDialog";
+import PastChats from "../components/PastChats";
 import { CitationWarning, markdownComponents } from "../components/CitationLink";
 import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
 
@@ -48,10 +65,12 @@ interface Props {
   repo: Repo;
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  conversationId: string | null; // the saved chat being shown (null = a new chat, saved after its first answer)
+  setConversationId: (id: string | null) => void;
   onBack: () => void;
 }
 
-export default function Chat({ repo, messages, setMessages, onBack }: Props) {
+export default function Chat({ repo, messages, setMessages, conversationId, setConversationId, onBack }: Props) {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,6 +79,8 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
   const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
   const [scope, setScope] = useState(""); // Phase 2: folder or file to search in ("" = the whole repo)
+  const [chats, setChats] = useState<ChatSummary[]>([]); // saved chats for the "Past chats" list
+  const [confirm, confirmDialog] = useConfirm(); // the app's own "Are you sure?" dialog
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Phase 2: a folder picked for one repo means nothing in another, so start each repo with the whole repo.
@@ -73,6 +94,67 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
   }
 
   useEffect(loadStatus, [repo.owner, repo.name]);
+
+  /** Loads the "Past chats" list. A failure just leaves the list empty: chatting still works. */
+  function loadChats() {
+    listChats(repo.owner, repo.name)
+      .then(setChats)
+      .catch(() => setChats([]));
+  }
+
+  useEffect(loadChats, [repo.owner, repo.name]);
+
+  /** Starts a new, empty chat. The current one stays saved under "Past chats". */
+  function newChat() {
+    setMessages([]);
+    setConversationId(null);
+    setError("");
+  }
+
+  /** Reopens a saved chat from the "Past chats" list. */
+  async function openSavedChat(id: string) {
+    if (!id || id === conversationId) return;
+    setError("");
+    try {
+      const chat = await getChat(repo.owner, repo.name, id);
+      setMessages(chat.messages);
+      setConversationId(chat.id);
+    } catch (err) {
+      setError((err as Error).message);
+      loadChats(); // it may have been deleted elsewhere
+    }
+  }
+
+  /** Deletes the chat being shown (after asking, by name), then starts a new one. Other chats are kept. */
+  async function deleteCurrentChat() {
+    if (!conversationId) return;
+    const title = chats.find((c) => c.id === conversationId)?.title ?? "this chat";
+    const ok = await confirm({
+      title: "Delete this chat?",
+      message: `"${title}" will be deleted. This can't be undone. Your other chats are kept.`,
+      confirmLabel: "Delete chat",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteChat(repo.owner, repo.name, conversationId);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    newChat();
+    loadChats();
+  }
+
+  /** "Delete selected" in Past chats. If the chat on screen is one of them, starts a new chat. */
+  async function deleteSelectedChats(ids: string[]) {
+    try {
+      await deleteChats(repo.owner, repo.name, ids);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    if (conversationId && ids.includes(conversationId)) newChat();
+    loadChats();
+  }
 
   // F2: whenever the answer style changes, save it so it's remembered next time.
   useEffect(() => localStorage.setItem("answerDepth", depth), [depth]);
@@ -101,7 +183,9 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
       { role: "assistant", content: "", sources: [] },
     ]);
     try {
-      await streamChat(repo.owner, repo.name, text, history, depth, scopePath, {
+      await streamChat(repo.owner, repo.name, text, history, depth, scopePath, conversationId, {
+        // Saved chat history: the server says which chat this went into (a new one gets its id here).
+        onConversation: (id) => setConversationId(id),
         onSources: (sources) => updateLastMessage((m) => ({ ...m, sources })),
         onToken: (token) => updateLastMessage((m) => ({ ...m, content: m.content + token })),
         // F3: save the suggested questions on the answer, so they show under it.
@@ -113,6 +197,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
       setMessages((prev) => (prev[prev.length - 1]?.content ? prev : prev.slice(0, -1)));
     } finally {
       setBusy(false);
+      loadChats(); // the answer is saved now, so the list shows it (with its new title, if it's a new chat)
     }
   }
 
@@ -145,6 +230,7 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
 
   return (
     <>
+      {confirmDialog}
       <div className="chat-bar">
         <div className="chat-bar-inner">
           <div className="chat-bar-top">
@@ -183,9 +269,20 @@ export default function Chat({ repo, messages, setMessages, onBack }: Props) {
                 <RefreshCw size={14} aria-hidden="true" />
                 Re-index
               </button>
-              <button className="secondary" onClick={() => setMessages([])} disabled={busy || messages.length === 0}>
+              {/* Saved chat history: open or delete past chats, start a new one, or delete the one being shown. */}
+              <PastChats chats={chats} currentId={conversationId} disabled={busy} onOpen={openSavedChat} onDelete={deleteSelectedChats} />
+              <button className="secondary" onClick={newChat} disabled={busy || messages.length === 0}>
+                <SquarePen size={14} aria-hidden="true" />
+                New chat
+              </button>
+              <button
+                className="secondary"
+                onClick={deleteCurrentChat}
+                disabled={busy || !conversationId}
+                aria-label="Delete this chat"
+                title="Delete this chat"
+              >
                 <Trash2 size={14} aria-hidden="true" />
-                Clear chat
               </button>
             </div>
           </div>

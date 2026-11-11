@@ -5,6 +5,16 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { buildArchitecture } from "./architecture.js";
+import {
+  appendExchange,
+  deleteConversation,
+  deleteConversations,
+  getConversation,
+  isConversationId,
+  listConversations,
+  MAX_CONVERSATIONS,
+  newConversationId,
+} from "./chatHistory.js";
 import { ROOT_DIR } from "./config.js";
 import { getDependencies } from "./dependencies.js";
 import { AppError } from "./errors.js";
@@ -132,9 +142,10 @@ export function createApp() {
     res.json(getJob());
   });
 
-  // Chat: body is { question, history, depth, scope }. `scope` (optional) limits the search to a folder or file;
-  // it's checked against the indexed files in rag.ts. Streams the answer as Server-Sent Events in this order:
-  // "sources", then many "token", then "followups" (F3), then "done". Or "error" if something fails.
+  // Chat: body is { question, history, depth, scope, conversationId }. `scope` (optional) limits the search to a
+  // folder or file; it's checked against the indexed files in rag.ts. Streams the answer as Server-Sent Events:
+  // "conversation" (which saved chat this goes into), "sources", many "token", "followups" (F3), then "done".
+  // Or "error" if something fails. The question and answer are saved once the answer has finished.
   app.post("/api/repos/:owner/:repo/chat", async (req, res) => {
     const { owner, repo } = repoParams(req);
     const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
@@ -143,6 +154,8 @@ export function createApp() {
     const depth: AnswerDepth = req.body?.depth === "executive" ? "executive" : "technical";
     const scope = typeof req.body?.scope === "string" ? req.body.scope : ""; // Phase 2: "" = the whole repo
     if (!question) throw new AppError("Please type a question.", 400);
+    // Saved chat history: continue the browser's conversation, or start a new one if it has none (or a bad id).
+    const conversationId = isConversationId(req.body?.conversationId) ? req.body.conversationId : newConversationId();
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -155,6 +168,7 @@ export function createApp() {
     let closed = false;
     res.on("close", () => (closed = true));
 
+    send("conversation", { id: conversationId });
     try {
       const { sources, tokens, scope: checkedScope } = await answer(toRepoId(owner, repo), question, history, depth, scope);
       send("sources", sources);
@@ -166,12 +180,54 @@ export function createApp() {
       }
       // F3: once the answer is complete, send 3 suggested follow-up questions (skipped if the user left).
       // Phase 2: if a folder or file was picked, the suggestions are about it too.
-      if (!closed) send("followups", await suggestFollowUps(question, answerText, depth, checkedScope));
+      if (!closed) {
+        const followUps = await suggestFollowUps(question, answerText, depth, checkedScope);
+        send("followups", followUps);
+        // Save the finished question and answer. Why only now: a half-streamed answer is never saved.
+        // A failed save is logged but doesn't spoil the answer the user already has.
+        await appendExchange(
+          toRepoId(owner, repo),
+          conversationId,
+          { content: question, scope: checkedScope?.path },
+          { content: answerText, sources, followUps },
+        ).catch((err) => console.error("Chat not saved:", err instanceof Error ? err.message : err));
+      }
       send("done", {});
     } catch (err) {
       send("error", { error: userMessage(err) });
     }
     res.end();
+  });
+
+  // Saved chat history: the repo's conversations (most recent first), one conversation, or delete some.
+  app.get("/api/repos/:owner/:repo/chats", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await listConversations(toRepoId(owner, repo)));
+  });
+
+  app.get("/api/repos/:owner/:repo/chats/:id", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const conversation = isConversationId(req.params.id) ? await getConversation(toRepoId(owner, repo), req.params.id) : null;
+    if (!conversation) throw new AppError("That chat doesn't exist (it may have been deleted).", 404);
+    res.json(conversation);
+  });
+
+  // Delete several chats at once ("Delete selected"). Body: { ids: [...] }. Returns how many were deleted.
+  // Why POST: a body on DELETE requests isn't reliably supported.
+  app.post("/api/repos/:owner/:repo/chats/delete", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const ids: unknown = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_CONVERSATIONS || !ids.every(isConversationId)) {
+      throw new AppError("Pick at least one chat to delete.", 400);
+    }
+    res.json({ deleted: await deleteConversations(toRepoId(owner, repo), ids) });
+  });
+
+  app.delete("/api/repos/:owner/:repo/chats/:id", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const deleted = isConversationId(req.params.id) && (await deleteConversation(toRepoId(owner, repo), req.params.id));
+    if (!deleted) throw new AppError("That chat doesn't exist (it may have been deleted).", 404);
+    res.json({ ok: true });
   });
 
   // For normal use (after `npm run build`), Express also serves the built web app.

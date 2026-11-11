@@ -63,7 +63,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | Feature | Source | Effort | Notes |
 |---|---|---|---|
 | **Index-time folder summaries** | Opus | M | While indexing, write a short summary of each folder and store it as a searchable document. Big-picture questions then use these summaries. Per folder rather than per file, to stay within Gemini's free-tier limits. |
-| **Saved chat history** | PRD | M | Keep conversations per repo across sessions, in SQLite (`better-sqlite3`). The same database can later hold the code graph. |
+| **Saved chat history** ✅ Done | PRD | M | Keep conversations per repo across sessions, in SQLite (`better-sqlite3`). The same database can later hold the code graph. |
 | **Incremental re-index** | Opus + Claude Code | M | Re-embed only files whose content changed since the last index. |
 | **Usage and cost display** | Claude Code | S | Show the Gemini tokens used per answer and per index. |
 | **Dependency scan** ✅ Done | Claude Code | S–M | Read `package.json`, `requirements.txt`, `go.mod`, `pom.xml` and similar files directly, to give exact dependencies and versions without relying on the AI. |
@@ -554,3 +554,46 @@ The AI is also given the exact list, so its "Tech stack" and "Dependencies" text
 | [server/tests/report.test.ts](server/tests/report.test.ts) | 5 tests: grouping, the section (warnings, errors, escaping `\|`), empty and failed scans, the AI prompt, citation clean-up |
 
 **How to demo:** open a repo → **Report** → **Regenerate** → scroll to *Dependencies*. Point out the counts, the per-language table, and the "Tech stack" section quoting the same versions.
+
+### Saved chat history ✅ (Phase 3, from the PRD)
+
+**What it does:** chats are saved per repo, so they survive a page reload, switching repos or restarting the app.
+- Opening a repo reopens its **most recent chat**, with answers, sources (citation links still work), follow-up buttons and "Search in" tags.
+- **New chat** (replaces "Clear chat") starts a fresh chat. The old one is kept.
+- **Past chats (n)** panel in the chat header: click a title to reopen that chat (title = its first question, plus the date or time). Tick one or more chats and click **Delete selected (n)** to delete them together; **Select all** first deletes every chat.
+- **Bin button** deletes only the chat on screen. The confirmation names it: *"How does indexing work?" will be deleted. This can't be undone. Your other chats are kept.*
+- **Confirmations use the app's own dialog** ([web/src/components/ConfirmDialog.tsx](web/src/components/ConfirmDialog.tsx)), not the browser's `window.confirm()`, which always says "127.0.0.1:5173 says" and can't be styled. It's built on the HTML `<dialog>` element: Esc cancels, the page behind is dimmed, and **Cancel** has the focus, so pressing Enter can't delete by accident. The delete button is red.
+
+**Why "delete all" lives in the panel, not on the main bin button** (changed after testing): one click next to "New chat" plus a reflex "OK" would wipe every chat, with no undo. In the panel it takes two deliberate clicks (Select all → Delete selected). The first version's confirmation also didn't say which chat it was deleting, which was confusing.
+
+**Decision: JSON files, not SQLite** (the roadmap first said SQLite / `better-sqlite3`). One user and small files, like the hotspots and reports, and no native library to build on Windows. Move to SQLite when the call graph needs a real database.
+
+**How it works** ([server/src/chatHistory.ts](server/src/chatHistory.ts)):
+1. One file per repo: `data/chats/<owner>__<repo>.json`, holding a list of conversations: id, title, dates, and messages (with sources, follow-ups and folder).
+2. The browser sends the chat's id with each question (none for a new chat). The server answers with a `conversation` event first, giving the id; a new chat gets a fresh UUID.
+3. **Saved by the server once the answer has finished**, question and answer together. If the page is closed mid-answer or the AI fails, nothing half-done is saved. A failed save is logged and doesn't spoil the answer on screen.
+4. **Safe writes:** changes to one repo's file happen one at a time, so two answers finishing together (e.g. two tabs) can't overwrite each other. Each save writes a temporary file and renames it, so a crash can't leave a broken file.
+5. **Limits:** 50 chats per repo (least recently used dropped), 400 messages per chat.
+6. Ids from the browser are checked (letters, digits, dashes). Anything else, e.g. `../../etc`, starts a new chat or returns 404.
+7. API: `GET /chats` (list), `GET /chats/:id` (one chat), `DELETE /chats/:id`, and `POST /chats/delete` with `{ ids: [...] }` to delete several in **one save** (so a failure can't leave some deleted and some not).
+
+**Tested:**
+- In the real app (Gemini): the first question created a chat; a second question with its id (and "Search in" `server/src`) was added to the same chat. Reopening it gave all 4 messages with their 8 sources, 3 follow-ups and the folder tag.
+- The API tests now use a temporary folder, so running the tests never writes into the real `data/`.
+
+**Known limits:** a question whose answer failed shows on screen but isn't saved. Chats aren't searchable yet. There's no rename. Re-indexing a repo keeps its chats, but old citation links point to the commit that was indexed when they were written.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/chatHistory.ts](server/src/chatHistory.ts) | **New.** `appendExchange()`, `listConversations()`, `getConversation()`, `deleteConversation()`, `titleFrom()`, `isConversationId()` |
+| [server/src/app.ts](server/src/app.ts) | Chat route: `conversation` event, saves after the answer. New `GET/DELETE …/chats` routes |
+| [server/tests/chatHistory.test.ts](server/tests/chatHistory.test.ts) | **New.** 9 tests: titles, id checks, create and append, list order, 10 saves at once, the 50-chat limit, delete one, delete several, file location |
+| [server/tests/app.test.ts](server/tests/app.test.ts) | Uses a temporary data folder; new event order; full save → list → open → delete flow; bad ids |
+| [web/src/api.ts](web/src/api.ts) | `listChats()`, `getChat()`, `deleteChat()`; `streamChat()` sends the chat id and handles the `conversation` event |
+| [web/src/App.tsx](web/src/App.tsx) | Remembers the open chat's id; opening a repo loads its most recent chat |
+| [web/src/components/PastChats.tsx](web/src/components/PastChats.tsx) | **New.** The Past chats panel: open a chat, tick chats, Select all, Delete selected. Closes with Esc or a click outside |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | Past chats panel, New chat, bin button (names the chat); refreshes the list after each answer |
+| [web/src/index.css](web/src/index.css) | Panel styles (light and dark themes) |
+
+**How to demo:** ask a question → reload the page → open the repo again: the chat is still there → **New chat** → ask something else → open **Past chats** and switch between the two → tick both → **Delete selected (2)**.

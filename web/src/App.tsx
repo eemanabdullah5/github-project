@@ -1,10 +1,10 @@
 // The top of the web app. It holds:
 //  - which view is showing (the repo browser or the chat)
-//  - the selected repo and its chat messages
+//  - the selected repo, its chat messages, and which saved chat they belong to
 //  - the light/dark theme, shown as a toggle in the header of both views
 import { GitBranch, Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { ChatMessage, Repo } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { getChat, listChats, type ChatMessage, type Repo } from "./api";
 import Chat from "./views/Chat";
 import RepoBrowser from "./views/RepoBrowser";
 
@@ -21,6 +21,8 @@ export default function App() {
   const [view, setView] = useState<"browser" | "chat">("browser");
   const [repo, setRepo] = useState<Repo | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null); // saved chat being shown (null = new chat)
+  const openingRepo = useRef(""); // the repo whose saved chat is loading. Why: ignore a late reply after switching repo
   const [theme, setTheme] = useState<Theme>(initialTheme);
 
   // Apply the theme to the page (index.css reads data-theme) and remember the choice.
@@ -29,11 +31,27 @@ export default function App() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
-  /** Opens the chat for a repo. Switching to a different repo clears the previous chat. */
-  function openChat(next: Repo) {
-    if (next.repoId !== repo?.repoId) setMessages([]);
+  /**
+   * Opens the chat for a repo. Switching to a different repo replaces the chat with that repo's
+   * most recent saved chat (or an empty one if it has none). Reopening the same repo keeps the chat as it is.
+   */
+  async function openChat(next: Repo) {
     setRepo(next);
     setView("chat");
+    if (next.repoId === repo?.repoId) return;
+    setMessages([]);
+    setConversationId(null);
+    openingRepo.current = next.repoId;
+    try {
+      const [latest] = await listChats(next.owner, next.name);
+      if (!latest) return;
+      const chat = await getChat(next.owner, next.name, latest.id);
+      if (openingRepo.current !== next.repoId) return; // the user already opened another repo
+      setMessages(chat.messages);
+      setConversationId(chat.id);
+    } catch {
+      // Couldn't load saved chats: start with an empty chat. Asking a question still works.
+    }
   }
 
   return (
@@ -61,7 +79,14 @@ export default function App() {
       </header>
 
       {view === "chat" && repo ? (
-        <Chat repo={repo} messages={messages} setMessages={setMessages} onBack={() => setView("browser")} />
+        <Chat
+          repo={repo}
+          messages={messages}
+          setMessages={setMessages}
+          conversationId={conversationId}
+          setConversationId={setConversationId}
+          onBack={() => setView("browser")}
+        />
       ) : (
         <RepoBrowser onOpenChat={openChat} />
       )}

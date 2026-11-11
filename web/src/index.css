@@ -1194,6 +1194,136 @@ button.segment[aria-checked="true"]:hover:not(:disabled) {
   color: var(--muted);
 }
 
+/* Saved chat history: the "Past chats" panel in the chat header (components/PastChats.tsx). */
+.past-chats {
+  position: relative;
+}
+
+.past-chats-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.past-chats-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.past-chats-panel li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+}
+
+.past-chats-panel li:hover,
+.past-chats-panel li.current {
+  background: var(--surface-2);
+}
+
+/* The title is a button that opens the chat. Long titles are cut with "…" instead of wrapping. */
+.past-chat-title {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  padding: 6px 4px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.past-chat-title:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.past-chats-panel li.current .past-chat-title {
+  font-weight: 600;
+}
+
+.past-chat-date {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.past-chats-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* A delete action: red text, so it doesn't look like an ordinary button. */
+button.danger {
+  color: var(--error);
+}
+
+/* The app's own "Are you sure?" dialog (components/ConfirmDialog.tsx), instead of the browser's box. */
+.confirm-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px 22px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 25%);
+}
+
+.confirm-dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.confirm-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.confirm-dialog p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere; /* long chat titles wrap instead of widening the dialog */
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* The confirm button for something that can't be undone: solid red. Page-colour text reads in both themes. */
+button.danger-solid {
+  background: var(--error);
+  border-color: var(--error);
+  color: var(--bg);
+}
+
+button.danger-solid:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 /* Phase 2: "Search in" — ask about one folder or file. */
 .scope-row {
   display: flex;

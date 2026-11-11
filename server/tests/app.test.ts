@@ -1,8 +1,18 @@
 // Tests for the HTTP API. The GitHub client, indexer and RAG modules are replaced with fakes.
+import { mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppError } from "../src/errors.js";
+
+// Saved chats go to a temporary folder. Why: the tests must never write into the real data/ folder.
+const tempDir = mkdtempSync(path.join(tmpdir(), "app-test-"));
+vi.mock("../src/config.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/config.js")>()),
+  DATA_DIR: tempDir,
+}));
 
 vi.mock("../src/githubClient.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/githubClient.js")>()),
@@ -47,6 +57,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  rmSync(tempDir, { recursive: true, force: true });
   server.close();
 });
 
@@ -103,7 +114,7 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
     });
     expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
     const events = (await res.text()).trim().split("\n\n").map((e) => e.split("\n")[0]);
-    expect(events).toEqual(["event: sources", "event: token", "event: token", "event: followups", "event: done"]);
+    expect(events).toEqual(["event: conversation", "event: sources", "event: token", "event: token", "event: followups", "event: done"]);
   });
 
   // F2: the answer style from the browser reaches rag.answer() (4th argument).
@@ -145,5 +156,63 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
       body: JSON.stringify({ question: "  " }),
     });
     expect(res.status).toBe(400);
+  });
+
+  // Saved chat history: a finished answer is saved, listed, can be reopened and deleted.
+  it("saves each finished question and answer, and lists, opens and deletes chats", async () => {
+    const chatUrl = `${baseUrl}/api/repos/octo/saved/chat`;
+    const ask = (body: object) =>
+      fetch(chatUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.text());
+    const idOf = (stream: string) => JSON.parse(stream.match(/event: conversation\ndata: (.*)/)![1]).id as string;
+
+    // First question: a new chat is made. Second question with its id: added to the same chat.
+    const id = idOf(await ask({ question: "What is this repo?" }));
+    expect(idOf(await ask({ question: "And the tests?", conversationId: id, scope: "server/src" }))).toBe(id);
+
+    const list = await (await fetch(`${baseUrl}/api/repos/octo/saved/chats`)).json();
+    expect(list).toEqual([expect.objectContaining({ id, title: "What is this repo?", messageCount: 4 })]);
+
+    const chat = await (await fetch(`${baseUrl}/api/repos/octo/saved/chats/${id}`)).json();
+    expect(chat.messages.map((m: { role: string; content: string }) => `${m.role}: ${m.content}`)).toEqual([
+      "user: What is this repo?",
+      "assistant: Hello world",
+      "user: And the tests?",
+      "assistant: Hello world",
+    ]);
+    expect(chat.messages[1]).toMatchObject({ sources: [{ path: "a.ts" }], followUps: ["What next?"] });
+    expect(chat.messages[2].scope).toBe("server/src"); // the "Search in" folder is remembered
+
+    expect((await fetch(`${baseUrl}/api/repos/octo/saved/chats/${id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/repos/octo/saved/chats/${id}`)).status).toBe(404);
+    expect(await (await fetch(`${baseUrl}/api/repos/octo/saved/chats`)).json()).toEqual([]);
+  });
+
+  it("deletes several chats at once, and rejects an empty or bad list", async () => {
+    const json = { "Content-Type": "application/json" };
+    const post = (body: object) =>
+      fetch(`${baseUrl}/api/repos/octo/many/chat`, { method: "POST", headers: json, body: JSON.stringify(body) }).then((r) => r.text());
+    const ids: string[] = [];
+    for (const q of ["One?", "Two?", "Three?"]) ids.push(JSON.parse((await post({ question: q })).match(/event: conversation\ndata: (.*)/)![1]).id);
+    const del = (body: object) => fetch(`${baseUrl}/api/repos/octo/many/chats/delete`, { method: "POST", headers: json, body: JSON.stringify(body) });
+
+    const res = await del({ ids: [ids[0], ids[2]] });
+    expect(await res.json()).toEqual({ deleted: 2 });
+    const left = await (await fetch(`${baseUrl}/api/repos/octo/many/chats`)).json();
+    expect(left.map((c: { title: string }) => c.title)).toEqual(["Two?"]);
+
+    expect((await del({ ids: [] })).status).toBe(400);
+    expect((await del({ ids: ["../x"] })).status).toBe(400);
+    expect((await del({})).status).toBe(400);
+  });
+
+  it("starts a new chat when the conversation id is missing or not a valid id", async () => {
+    const res = await fetch(`${baseUrl}/api/repos/octo/other/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: "hi", conversationId: "../../etc/passwd" }),
+    });
+    const id = JSON.parse((await res.text()).match(/event: conversation\ndata: (.*)/)![1]).id;
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await fetch(`${baseUrl}/api/repos/octo/other/chats/..%2F..%2Fetc`)).status).toBe(404);
   });
 });

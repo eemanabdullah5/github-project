@@ -199,7 +199,9 @@ export async function streamChat(
   history: ChatMessage[],
   depth: AnswerDepth, // F2: the answer style chosen with the toggle
   scope: string, // Phase 2: the folder or file to search in, or "" for the whole repo
+  conversationId: string | null, // saved chat history: the chat this question belongs to (null = start a new one)
   handlers: {
+    onConversation: (id: string) => void; // saved chat history: called first, with the chat's id
     onSources: (sources: Source[]) => void;
     onToken: (text: string) => void;
     onFollowUps: (questions: string[]) => void; // F3: called once, after the answer is complete
@@ -211,7 +213,7 @@ export async function streamChat(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // F2: depth is sent with every question, so the server knows which answer style to use.
-      body: JSON.stringify({ question, depth, scope, history: history.map(({ role, content }) => ({ role, content })) }),
+      body: JSON.stringify({ question, depth, scope, conversationId, history: history.map(({ role, content }) => ({ role, content })) }),
     });
   } catch {
     throw new Error("Can't reach the server. Is it running? (npm run dev)");
@@ -231,6 +233,7 @@ export async function streamChat(
     for (const raw of events) {
       const event = raw.match(/^event: (.*)$/m)?.[1];
       const data = JSON.parse(raw.match(/^data: (.*)$/m)?.[1] ?? "null");
+      if (event === "conversation") handlers.onConversation(data.id);
       if (event === "sources") handlers.onSources(data);
       if (event === "token") handlers.onToken(data);
       if (event === "followups") handlers.onFollowUps(data); // F3
@@ -238,6 +241,50 @@ export async function streamChat(
       if (event === "done") return;
     }
   }
+}
+
+// ---------- Saved chat history (same shapes as server/src/chatHistory.ts) ----------
+
+/** One saved chat, as shown in the "Past chats" list. */
+export interface ChatSummary {
+  id: string;
+  title: string; // the first question, shortened
+  updatedAt: string;
+  messageCount: number;
+}
+
+/** One saved chat with its messages. */
+export interface SavedChat {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
+
+/** The repo's saved chats, most recent first. */
+export function listChats(owner: string, name: string): Promise<ChatSummary[]> {
+  return request(`${repoPath(owner, name)}/chats`);
+}
+
+/** One saved chat with all its messages. */
+export function getChat(owner: string, name: string, id: string): Promise<SavedChat> {
+  return request(`${repoPath(owner, name)}/chats/${encodeURIComponent(id)}`);
+}
+
+/** Deletes several saved chats at once ("Delete selected"). Returns how many were deleted. */
+export async function deleteChats(owner: string, name: string, ids: string[]): Promise<number> {
+  const result = await request<{ deleted: number }>(`${repoPath(owner, name)}/chats/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  return result.deleted;
+}
+
+/** Deletes one saved chat. */
+export async function deleteChat(owner: string, name: string, id: string): Promise<void> {
+  await request(`${repoPath(owner, name)}/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 // ---------- Phase 4: architecture map (same shape as ArchitectureMap in server/src/architecture.ts) ----------
