@@ -244,6 +244,60 @@ export async function streamChat(
   }
 }
 
+// ---------- Call graph (same shapes as server/src/callGraph.ts) ----------
+
+/** One function in the call graph. `callers` / `callees`: how many call it, and how many it calls. */
+export interface CallFunction {
+  id: string; // "server/src/rag.ts#answer"
+  name: string;
+  qualified: string; // with its class: "Agent.remember"
+  file: string;
+  line: number;
+  endLine: number;
+  kind: "function" | "method" | "top-level";
+  isTest: boolean;
+  callers?: number;
+  callees?: number;
+}
+
+/** A function next to the focused one in the diagram. */
+export interface FocusItem {
+  fn: CallFunction;
+  level: 1 | 2; // 2 = one step further from the focused function
+  parent: string; // the function it connects to
+  line: number; // where the call is written
+  site: string; // the file the call is written in
+  certain: boolean; // false = "possible" (a method matched by its name)
+}
+
+/** One function's callers and callees, and its Mermaid diagram. */
+export interface CallFocus {
+  commitSha: string;
+  center: CallFunction;
+  depth: 1 | 2;
+  callers: FocusItem[];
+  callees: FocusItem[];
+  more: { callers: number; callees: number };
+  mermaid: string;
+}
+
+export interface CallGraphStats {
+  calls: number;
+  certain: number;
+  possible: number;
+  dropped: number;
+}
+
+/** Every function in the repo's call graph, most-called first (for the picker). */
+export function getCallFunctions(owner: string, name: string): Promise<{ commitSha: string; stats: CallGraphStats; functions: CallFunction[] }> {
+  return request(`${repoPath(owner, name)}/calls`);
+}
+
+/** One function's callers and callees (depth 1 or 2), with its diagram. */
+export function getCallFocus(owner: string, name: string, fn: string, depth: 1 | 2): Promise<CallFocus> {
+  return request(`${repoPath(owner, name)}/calls/focus?fn=${encodeURIComponent(fn)}&depth=${depth}`);
+}
+
 // ---------- Saved chat history (same shapes as server/src/chatHistory.ts) ----------
 
 /** One saved chat, as shown in the "Past chats" list. */

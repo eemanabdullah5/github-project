@@ -3,8 +3,9 @@
 // a "show empty repos" toggle and pages of 20. Search/sort/filter run in the browser over the full list.
 // Selecting a repo checks its index: fresh → open chat, missing → index it, stale → ask to re-index.
 import { AlertCircle, ChevronDown, ChevronRight, RefreshCw, Search, Star } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getIndexJob, getRepo, getStatus, listRepos, startIndex, type Repo } from "../api";
+import { useChoice } from "../components/ConfirmDialog";
 import IndexProgress from "../components/IndexProgress";
 
 const PAGE_SIZE = 20;
@@ -21,6 +22,22 @@ function SelectField(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
       <select {...props} />
       <ChevronDown size={14} aria-hidden="true" />
     </div>
+  );
+}
+
+/**
+ * Shows its children in a modal pop-up in the middle of the screen, so it's seen even when the page
+ * is scrolled down. Esc does nothing: the indexing job keeps running and the pop-up closes by itself.
+ */
+function ProgressDialog({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  return (
+    <dialog ref={ref} className="progress-dialog" aria-label="Indexing progress" onCancel={(e) => e.preventDefault()}>
+      {children}
+    </dialog>
   );
 }
 
@@ -62,9 +79,15 @@ export default function RepoBrowser({ onOpenChat }: Props) {
 
   // Selecting and indexing a repo.
   const [selected, setSelected] = useState<Repo | null>(null);
-  const [askReindex, setAskReindex] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [message, setMessage] = useState("");
+  const [choose, choiceDialog] = useChoice();
+
+  // Errors show at the top of the page; scroll them into view so they're seen when scrolled down.
+  const messageRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (message) messageRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [message]);
 
   /** Loads the repo list (refresh=true asks GitHub again instead of using the server's cache). */
   async function loadRepos(refresh = false) {
@@ -121,12 +144,19 @@ export default function RepoBrowser({ onOpenChat }: Props) {
     }
     setMessage("");
     setSelected(repo);
-    setAskReindex(false);
     try {
       const { status } = await getStatus(repo.owner, repo.name);
       if (status === "fresh") onOpenChat(repo);
-      else if (status === "stale") setAskReindex(true);
-      else await beginIndexing(repo);
+      else if (status === "stale") {
+        const answer = await choose({
+          title: "Re-index this repo?",
+          message: `${repo.owner}/${repo.name} has new commits since it was indexed. Re-index to include them, or use the existing index.`,
+          confirmLabel: "Re-index",
+          altLabel: "Use the existing index",
+        });
+        if (answer === "confirm") await beginIndexing(repo);
+        else if (answer === "alt") onOpenChat(repo);
+      } else await beginIndexing(repo);
     } catch (err) {
       setMessage((err as Error).message);
     }
@@ -134,7 +164,6 @@ export default function RepoBrowser({ onOpenChat }: Props) {
 
   /** Asks the server to start indexing, then shows the progress panel. */
   async function beginIndexing(repo: Repo) {
-    setAskReindex(false);
     setMessage("");
     try {
       await startIndex(repo.owner, repo.name);
@@ -199,32 +228,24 @@ export default function RepoBrowser({ onOpenChat }: Props) {
       </form>
 
       {message && (
-        <p className="error" role="alert">
+        <p className="error" role="alert" ref={messageRef}>
           <AlertCircle size={16} aria-hidden="true" />
           <span>{message}</span>
         </p>
       )}
 
-      {askReindex && selected && (
-        <div className="panel tint" role="status">
-          <p>
-            <strong>{selected.owner}/{selected.name}</strong> has new commits since it was indexed. Re-index?
-          </p>
-          <div className="row">
-            <button className="secondary" onClick={() => onOpenChat(selected)}>Use the existing index</button>
-            <button onClick={() => beginIndexing(selected)}>Re-index</button>
-          </div>
-        </div>
-      )}
+      {choiceDialog}
 
       {indexing && (
-        <IndexProgress
-          onReady={onIndexReady}
-          onFailed={(msg) => {
-            setIndexing(false);
-            setMessage(msg);
-          }}
-        />
+        <ProgressDialog>
+          <IndexProgress
+            onReady={onIndexReady}
+            onFailed={(msg) => {
+              setIndexing(false);
+              setMessage(msg);
+            }}
+          />
+        </ProgressDialog>
       )}
 
       <section className="browser-list" aria-label="Your repositories">

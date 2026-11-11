@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { buildArchitecture } from "./architecture.js";
-import { focusGraph, getCallGraph, listFunctions } from "./callGraph.js";
+import { focusGraph, focusMermaid, getCallGraph, listFunctions } from "./callGraph.js";
 import {
   appendExchange,
   deleteConversation,
@@ -136,14 +136,18 @@ export function createApp() {
     res.json({ commitSha: graph.commitSha, stats: graph.stats, functions: listFunctions(graph) });
   });
 
-  // Call graph focus: one function's callers and callees. ?fn=<function id>&depth=1|2
+  // Call graph focus: one function's callers and callees, and its diagram. ?fn=<function id>&depth=1|2
+  // Hotspot files are tinted in the diagram if the history has been analysed.
   app.get("/api/repos/:owner/:repo/calls/focus", async (req, res) => {
     const { owner, repo } = repoParams(req);
     const fn = typeof req.query.fn === "string" ? req.query.fn : "";
     if (!fn) throw new AppError("Pick a function.", 400);
     const depth = req.query.depth === "2" ? 2 : 1;
-    const graph = await getCallGraph(owner, repo, toRepoId(owner, repo));
-    res.json({ commitSha: graph.commitSha, ...focusGraph(graph, fn, depth) });
+    const repoId = toRepoId(owner, repo);
+    const graph = await getCallGraph(owner, repo, repoId);
+    const view = focusGraph(graph, fn, depth);
+    const history = (await loadHistory(repoId))?.report ?? null;
+    res.json({ commitSha: graph.commitSha, ...view, mermaid: focusMermaid(view, history) });
   });
 
   // Phase 4: the architecture map (modules, the imports between them, cycles, hotspot colours, Mermaid diagram).

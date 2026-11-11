@@ -1,9 +1,9 @@
 // Tests for the call graph. Phase 1: reading functions and calls, and matching each call to a function.
-// Phase 2: the function list and one function's callers and callees.
+// Phase 2: the function list and one function's callers and callees. Phase 3: the diagram.
 // Small TypeScript and Python samples, each checking one matching rule. No network or disk.
 import { describe, expect, it } from "vitest";
-import { buildCallGraph, focusGraph, isTestFile, listFunctions, type CallGraph } from "../src/callGraph.js";
-import type { SourceFile } from "../src/types.js";
+import { buildCallGraph, focusGraph, focusMermaid, isTestFile, listFunctions, type CallGraph } from "../src/callGraph.js";
+import type { HistoryReport, SourceFile } from "../src/types.js";
 
 const ts = (path: string, text: string): SourceFile => ({ path, text, language: "typescript" });
 const py = (path: string, text: string): SourceFile => ({ path, text, language: "python" });
@@ -196,5 +196,42 @@ describe("listFunctions and focusGraph", async () => {
 
   it("says clearly when the function isn't in the graph", () => {
     expect(() => focusGraph(g, "src/m.ts#gone", 1)).toThrow("isn't in the call graph");
+  });
+});
+
+// ---------- Phase 3: the diagram ----------
+
+describe("focusMermaid", async () => {
+  const g = await buildCallGraph(
+    [
+      ts("src/m.ts", `export function a() { b(); }\nexport function b() { c(); }\nexport function c() {}`),
+      ts("src/m.test.ts", `import { b } from "./m.js";\nfunction t() { b(); }`),
+      py("agents.py", `class A:\n    def go(self): pass\nclass B:\n    def go(self): pass\ndef run(x):\n    x.go()\n`),
+    ],
+    { repoId: "o/r", commitSha: "abc" },
+  );
+
+  it("draws callers → the function → callees, with the function highlighted and tests grey", () => {
+    const text = focusMermaid(focusGraph(g, "src/m.ts#b", 1));
+    expect(text.startsWith("flowchart LR")).toBe(true);
+    expect(text).toContain('c["b()<br/>src/m.ts"]');
+    expect(text).toMatch(/n\d --> c/); // a caller points at the function
+    expect(text).toMatch(/c --> n\d/); // the function points at what it calls
+    expect(text).toContain("class c center");
+    expect(text).toMatch(/class n\d test/); // the test caller is grey
+  });
+
+  it("draws possible calls as dashed arrows, and tints hotspot files", () => {
+    const history = { files: [{ path: "agents.py", score: 80 }] } as unknown as HistoryReport;
+    const text = focusMermaid(focusGraph(g, "agents.py#run", 1), history);
+    expect(text).toMatch(/c -\.-> n\d/);
+    expect(text).toMatch(/class n\d,n\d heat3/);
+  });
+
+  it("keeps quotes and angle brackets in names from breaking the diagram", async () => {
+    const odd = await buildCallGraph([ts('src/q"<x>.ts', `export function f() { g(); }\nexport function g() {}`)], { repoId: "o/r", commitSha: "abc" });
+    const text = focusMermaid(focusGraph(odd, 'src/q"<x>.ts#f', 1));
+    expect(text).toContain("src/q#quot;x.ts");
+    expect(text).not.toContain("<x>");
   });
 });

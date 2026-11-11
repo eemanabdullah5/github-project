@@ -14,10 +14,12 @@
 // Phase 1: build the graph in memory from a repo's files.
 // Phase 2: save it (data/callgraphs/<owner>__<repo>.json, built at indexing or on first use), and the data the
 //          API returns: the function list and one function's callers and callees.
-// Later phases: the Calls tab with its diagram, and the chat and report hooks.
+// Phase 3: the diagram for the Calls tab (focusMermaid).
+// Later phases: the chat and report hooks.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Node } from "web-tree-sitter";
+import { heatLevel } from "./architecture.js";
 import { LANGUAGES } from "./chunking/languages.js";
 import { getParser } from "./chunking/syntaxChunker.js";
 import { DATA_DIR } from "./config.js";
@@ -25,7 +27,7 @@ import { AppError } from "./errors.js";
 import { downloadZipball } from "./githubClient.js";
 import { resolveJs, resolvePython } from "./importResolvers.js";
 import { extractSourceFiles } from "./ingestion.js";
-import type { SourceFile } from "./types.js";
+import type { HistoryReport, SourceFile } from "./types.js";
 import { loadManifest } from "./vectorStore.js";
 const CODE_LANGUAGES = new Set(["python", "javascript", "typescript", "tsx"]);
 
@@ -608,4 +610,59 @@ export function focusGraph(graph: CallGraph, id: string, depth: 1 | 2): FocusVie
   const callers = side(true);
   const callees = side(false);
   return { center, depth, callers: callers.items, callees: callees.items, more: { callers: callers.more, callees: callees.more } };
+}
+
+// ---------- Phase 3: the diagram ----------
+
+/** Makes text safe inside a quoted Mermaid label. */
+function label(text: string): string {
+  return text.replace(/"/g, "#quot;").replace(/[<>]/g, "");
+}
+
+/**
+ * Draws one function's focus view as a Mermaid flowchart, left to right: callers → the function → callees.
+ *  - solid arrow = certain call, dashed arrow = possible call
+ *  - the focused function is dark orange; test code is grey; other hotspot files get the architecture map's oranges
+ *  - "+N more" boxes when some were left out (they're all in the lists under the diagram)
+ */
+export function focusMermaid(view: FocusView, history: HistoryReport | null = null): string {
+  const ids = new Map<string, string>([[view.center.id, "c"]]);
+  const nodeId = (fnId: string) => {
+    if (!ids.has(fnId)) ids.set(fnId, `n${ids.size}`);
+    return ids.get(fnId)!;
+  };
+  // Box text: "Agent.remember()" with its file underneath. Top-level code shows as "(top level)" above its file.
+  const box = (fn: CallFunction) => {
+    const title = fn.kind === "top-level" ? "(top level)" : `${fn.qualified}()`;
+    return `["${label(title)}<br/>${label(fn.file)}"]`;
+  };
+
+  const lines = ["flowchart LR", `  c${box(view.center)}`];
+  const all = [...view.callers, ...view.callees];
+  for (const item of all) lines.push(`  ${nodeId(item.fn.id)}${box(item.fn)}`);
+  // Arrows always point from the caller to the function it calls.
+  for (const item of view.callers) lines.push(`  ${nodeId(item.fn.id)} ${item.certain ? "-->" : "-.->"} ${nodeId(item.parent)}`);
+  for (const item of view.callees) lines.push(`  ${nodeId(item.parent)} ${item.certain ? "-->" : "-.->"} ${nodeId(item.fn.id)}`);
+  if (view.more.callers) lines.push(`  moreIn["+${view.more.callers} more callers"] -.- c`);
+  if (view.more.callees) lines.push(`  c -.- moreOut["+${view.more.callees} more called"]`);
+
+  // The focused function: dark orange with a thick border, so it stands out even next to a top hotspot.
+  lines.push("  classDef center fill:#b4501c,stroke:#3d1a08,stroke-width:3px,color:#fff8f0,font-weight:bold");
+  lines.push("  classDef test fill:#e8e4dc,stroke:#a39b8d,color:#5c554b");
+  lines.push("  classDef heat1 fill:#f5e6d6,stroke:#b4501c,color:#1c1915");
+  lines.push("  classDef heat2 fill:#f0a274,stroke:#9e4617,color:#1c1915");
+  lines.push("  classDef heat3 fill:#e07a3f,stroke:#7a3410,color:#1c1915");
+  lines.push("  classDef more fill:none,stroke-dasharray:3 3,color:#6b6358");
+  lines.push("  class c center");
+  const scores = new Map((history?.files ?? []).map((f) => [f.path, f.score]));
+  const byStyle = new Map<string, Set<string>>();
+  for (const item of all) {
+    const heat = heatLevel(scores.get(item.fn.file));
+    const style = item.fn.isTest ? "test" : heat ? `heat${heat}` : "";
+    if (style) byStyle.set(style, (byStyle.get(style) ?? new Set()).add(nodeId(item.fn.id)));
+  }
+  for (const [style, nodes] of byStyle) lines.push(`  class ${[...nodes].join(",")} ${style}`);
+  const moreNodes = [view.more.callers ? "moreIn" : "", view.more.callees ? "moreOut" : ""].filter(Boolean);
+  if (moreNodes.length) lines.push(`  class ${moreNodes.join(",")} more`);
+  return lines.join("\n");
 }

@@ -1314,8 +1314,24 @@ button.danger {
 
 .confirm-actions {
   display: flex;
+  flex-wrap: wrap; /* three buttons fit on small screens */
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Indexing progress as a pop-up: the panel inside gives the look, the dialog only places it. */
+.progress-dialog {
+  width: min(640px, calc(100vw - 32px));
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 25%);
+}
+
+.progress-dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
 }
 
 /* The confirm button for something that can't be undone: solid red. Page-colour text reads in both themes. */
@@ -1920,4 +1936,115 @@ button.danger-solid:hover:not(:disabled) {
 .small-pill {
   margin-left: 8px;
   font-size: 11.5px;
+}
+
+/* ---------- Calls tab (components/CallGraph.tsx) ---------- */
+
+.calls-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.calls-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.calls-picker-row label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.calls-picker-row input {
+  flex: 1;
+  min-width: 260px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.calls-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* The function being shown, among the "Most called" buttons. */
+.calls-quick button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Legend swatches for the diagram's colours. */
+.swatch.center-swatch { background: #b4501c; }
+.swatch.test-swatch { background: #e8e4dc; }
+.legend-arrow {
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.calls-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 12px;
+}
+
+.calls-list h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.calls-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calls-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* One step further away: indented. */
+.calls-list li.level-2 {
+  padding-left: 24px;
+}
+
+.calls-item-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.calls-item-main strong {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-right: 6px;
+}
+
+button.calls-go {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.muted-pill {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 4px;
 }

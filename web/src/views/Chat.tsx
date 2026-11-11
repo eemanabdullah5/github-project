@@ -7,6 +7,7 @@
 // F4: a "Hotspots" tab next to the chat shows what the git history says about the repo.
 // F5: a "Report" tab shows a one-page health report that can be downloaded.
 // Phase 4: an "Architecture" tab shows the module map built from the import graph.
+// Call graph: a "Calls" tab shows who calls a function and what it calls, as a diagram and lists.
 // Phase 2: "Search in" limits a question to one folder or file; each question shows where it searched.
 // Saved chat history: chats are saved per repo. "New chat" starts a fresh one, the bin deletes the one on screen,
 // and "Past chats" opens a saved chat or deletes several at once (components/PastChats.tsx).
@@ -30,6 +31,7 @@ import {
   type StatusResponse,
 } from "../api";
 import Architecture from "../components/Architecture";
+import CallGraph from "../components/CallGraph";
 import HealthReport from "../components/HealthReport";
 import Hotspots from "../components/Hotspots";
 import IndexProgress from "../components/IndexProgress";
@@ -77,7 +79,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
   const [error, setError] = useState("");
   const [reindexing, setReindexing] = useState(false);
   const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
-  const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
+  const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "calls" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
   const [scope, setScope] = useState(""); // Phase 2: folder or file to search in ("" = the whole repo)
   const [chats, setChats] = useState<ChatSummary[]>([]); // saved chats for the "Past chats" list
   const [confirm, confirmDialog] = useConfirm(); // the app's own "Are you sure?" dialog
@@ -269,21 +271,26 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
                 <RefreshCw size={14} aria-hidden="true" />
                 Re-index
               </button>
-              {/* Saved chat history: open or delete past chats, start a new one, or delete the one being shown. */}
-              <PastChats chats={chats} currentId={conversationId} disabled={busy} onOpen={openSavedChat} onDelete={deleteSelectedChats} />
-              <button className="secondary" onClick={newChat} disabled={busy || messages.length === 0}>
-                <SquarePen size={14} aria-hidden="true" />
-                New chat
-              </button>
-              <button
-                className="secondary"
-                onClick={deleteCurrentChat}
-                disabled={busy || !conversationId}
-                aria-label="Delete this chat"
-                title="Delete this chat"
-              >
-                <Trash2 size={14} aria-hidden="true" />
-              </button>
+              {/* Saved chat history: open or delete past chats, start a new one, or delete the one being shown.
+                  Only on the Chat tab. Why: they only affect the chat, so on other tabs they'd just be confusing. */}
+              {tab === "chat" && (
+                <>
+                  <PastChats chats={chats} currentId={conversationId} disabled={busy} onOpen={openSavedChat} onDelete={deleteSelectedChats} />
+                  <button className="secondary" onClick={newChat} disabled={busy || messages.length === 0}>
+                    <SquarePen size={14} aria-hidden="true" />
+                    New chat
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={deleteCurrentChat}
+                    disabled={busy || !conversationId}
+                    aria-label="Delete this chat"
+                    title="Delete this chat"
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -294,6 +301,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
                 ["chat", "Chat"],
                 ["hotspots", "Hotspots"],
                 ["architecture", "Architecture"],
+                ["calls", "Calls"],
                 ["report", "Report"],
               ] as const
             ).map(([key, label]) => (
@@ -322,6 +330,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
 
       {tab === "hotspots" && <Hotspots repo={repo} />}
       {tab === "architecture" && <Architecture repo={repo} />}
+      {tab === "calls" && <CallGraph repo={repo} />}
       {tab === "report" && <HealthReport repo={repo} />}
 
       {/* Everything below is the Chat tab. */}
