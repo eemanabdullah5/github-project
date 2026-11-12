@@ -29,7 +29,8 @@ Rules:
 export const CALL_GRAPH_RULES = `Call graph: the <<<REPO CALL GRAPH>>> section lists, for functions named in the question, who calls them and what they call. It was made by parsing every file in the repository, not by search, so:
 - For "who calls X", "what does X call", "where is X used" or "what breaks if I change X", treat its lists as complete and prefer them over the code chunks. Give the count, and list the callers or callees with the citations shown there.
 - Calls marked "possible" were matched by method name only; say they may not be real calls.
-- Library and built-in calls (like console.log) are not in it, and calls made in unusual ways (e.g. passing a function as a value) can be missing. If the code chunks show a call the section doesn't list, mention it too.`;
+- Library and built-in calls (like console.log) are not in it, and calls made in unusual ways (e.g. passing a function as a value) can be missing. If the code chunks show a call the section doesn't list, mention it too.
+- If it has an "If it changes" part, use it for "what breaks if I change X", "is X tested" or "how risky is changing X": give the number of affected functions and files, the hotspot files and entry points, and the tests that reach it. If it says no test reaches it, say that clearly, as a risk.`;
 
 // F2: how detailed an answer should be.
 // "executive" = short and simple, for a CTO or manager. "technical" = full detail with code, for a developer.

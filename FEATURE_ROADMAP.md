@@ -76,7 +76,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Architecture map** ✅ Done | Opus | M–L | A zoomable module diagram with hotspot overlay, plus cycle detection. |
 | **Hidden coupling** ✅ Done | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
 | **Call graph** ✅ Graph, Calls tab and chat (report hook to do) | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
-| **Change impact** ✅ Calls tab (chat hook to do) | Opus | M | For a changed function: what depends on it, and which tests reach it. |
+| **Change impact** ✅ Calls tab and chat | Opus | M | For a changed function: what depends on it, and which tests reach it. |
 | **PR risk briefing** | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
 
 ## Later
@@ -720,4 +720,4 @@ Embedding all 576 from scratch would take about 6 minutes at the same rate. Sear
 | [web/src/components/ChangeImpact.tsx](web/src/components/ChangeImpact.tsx) | **New.** The section |
 | [web/src/components/CallGraph.tsx](web/src/components/CallGraph.tsx), [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | Shows it under the call lists; types; styles |
 
-**Next:** the chat hook ("what breaks if I change `buildPrompt`?").
+**Chat:** questions about changing, risk or tests ("what breaks if I change `buildPrompt`?", "is `vectorStore.query` tested?") add an *If it changes* part to the call graph block: affected functions and files, hotspots, entry points, and the tests that reach it, or a clear "no test reaches it". Code: `wantsImpact()` and `impactLines()` in [server/src/callGraphChat.ts](server/src/callGraphChat.ts); the rule is in `CALL_GRAPH_RULES`.

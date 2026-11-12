@@ -12,6 +12,7 @@
 // The text of every prompt sent to the AI lives in prompts.ts.
 import { savedCallGraphForChat } from "./callGraph.js";
 import { callGraphContext } from "./callGraphChat.js";
+import { loadHistory } from "./gitHistory.js";
 import { CHARS_PER_TOKEN, HISTORY_TURNS, MAX_README_TOKENS, MAX_TREE_LINES, NUM_CTX, TOP_K } from "./config.js";
 import { AppError } from "./errors.js";
 import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
@@ -196,7 +197,8 @@ export async function answer(
   // Call graph phase 4: callers and callees of any function the question names. The rewritten question is
   // checked too, so a follow-up like "and who calls it?" still finds the function.
   const graph = await savedCallGraphForChat(repoId, manifest.commitSha);
-  const calls = graph ? callGraphContext(graph, `${question}\n${searchQuery}`, scope) : null;
+  const gitReport = graph ? ((await loadHistory(repoId))?.report ?? null) : null; // hotspots, for change impact
+  const calls = graph ? callGraphContext(graph, `${question}\n${searchQuery}`, scope, gitReport) : null;
   const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope, callGraph: calls?.text });
 
   // The call graph's lines are sources too, so citations to them are verified. Chunks first, then those.

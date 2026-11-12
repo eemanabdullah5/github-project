@@ -2,9 +2,9 @@
 // graph, and the CALL GRAPH block + sources added to the chat prompt. No network, disk or AI.
 import { describe, expect, it } from "vitest";
 import { buildCallGraph } from "../src/callGraph.js";
-import { callGraphContext, functionNamesIn, matchFunctions } from "../src/callGraphChat.js";
+import { callGraphContext, functionNamesIn, matchFunctions, wantsImpact } from "../src/callGraphChat.js";
 import { buildPrompt } from "../src/rag.js";
-import type { SourceFile } from "../src/types.js";
+import type { HistoryReport, SourceFile } from "../src/types.js";
 
 const ts = (path: string, text: string): SourceFile => ({ path, text, language: "typescript" });
 
@@ -97,6 +97,53 @@ describe("callGraphContext", () => {
   it("says when nothing calls a function", async () => {
     const ctx = callGraphContext(await graphPromise, "who calls load?")!;
     expect(ctx.text).toContain("Called by (0):\n- none found");
+  });
+});
+
+describe("change impact in chat", () => {
+  it("spots questions about changes, risk and tests", () => {
+    expect(wantsImpact("What breaks if I change query?")).toBe(true);
+    expect(wantsImpact("Is answer tested?")).toBe(true);
+    expect(wantsImpact("How risky is refactoring answer?")).toBe(true);
+    expect(wantsImpact("Who calls answer?")).toBe(false);
+  });
+
+  it("finds the function in 'if I change X' and 'is X tested' questions", () => {
+    expect(functionNamesIn("what happens if I change query")).toEqual(["query"]);
+    expect(functionNamesIn("is answer tested?")).toEqual(["answer"]);
+  });
+
+  it("matches module.function names", async () => {
+    const { functions } = matchFunctions(await graphPromise, ["store.query"]);
+    expect(functions.map((f) => f.id)).toEqual(["src/store.ts#query"]);
+  });
+
+  it("adds callers all the way up, entry points and the tests that reach it", async () => {
+    const ctx = callGraphContext(await graphPromise, "what breaks if I change query?")!;
+    expect(ctx.text).toContain("If it changes (callers followed all the way up):");
+    expect(ctx.text).toContain("- Affects 3 functions, up to 2 steps away, in 4 files.");
+    expect(ctx.text).toContain("- Further callers: 2 steps: handleChat(), main()");
+    expect(ctx.text).toContain("- Entry points reached (code nothing else calls): handleChat() in src/app.ts, main() in src/cli.ts");
+    expect(ctx.text).toContain("- Tests that reach it (1):");
+    expect(ctx.text).toContain("checksAnswer() in tests/rag.test.ts, 2 steps away, at [tests/rag.test.ts:L3]");
+    expect(ctx.sources).toContainEqual({ path: "tests/rag.test.ts", startLine: 3, endLine: 3, symbol: "test reaches query()" });
+  });
+
+  it("names hotspot files when the history has been analysed", async () => {
+    const history = { files: [{ path: "src/app.ts", score: 90 }] } as unknown as HistoryReport;
+    const ctx = callGraphContext(await graphPromise, "what breaks if I change query?", null, history)!;
+    expect(ctx.text).toContain("in 4 files (1 of them hotspots)");
+    expect(ctx.text).toContain("- Hotspot files reached: src/app.ts");
+  });
+
+  it("says clearly when no test reaches it", async () => {
+    const ctx = callGraphContext(await graphPromise, "is load tested?")!;
+    expect(ctx.text).toContain("Nothing in the repo calls it");
+    expect(ctx.text).toContain("NO test reaches it");
+  });
+
+  it("leaves the impact part out of plain 'who calls' questions", async () => {
+    expect(callGraphContext(await graphPromise, "who calls query?")!.text).not.toContain("If it changes");
   });
 });
 
