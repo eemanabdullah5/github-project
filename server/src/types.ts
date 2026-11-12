@@ -52,7 +52,7 @@ export interface Manifest {
 
 export type IndexStatus = "missing" | "fresh" | "stale";
 
-export type IndexStep = "downloading" | "processing" | "embedding" | "ready" | "failed";
+export type IndexStep = "downloading" | "processing" | "embedding" | "summarizing" | "ready" | "failed";
 
 /** The single indexing job the server runs at a time. */
 export interface IndexJob {
@@ -61,6 +61,7 @@ export interface IndexJob {
   done: number;
   total: number;
   reused?: number; // embedding step: chunks that kept their saved vector (unchanged since the last index)
+  embedded?: number; // embedding step: chunks sent to the AI (kept after the step, since done/total move on)
   error: string | null;
   startedAt: string; // ISO date
 }

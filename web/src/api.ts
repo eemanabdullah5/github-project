@@ -33,10 +33,11 @@ export interface StatusResponse {
 
 export interface IndexJob {
   repoId: string;
-  step: "downloading" | "processing" | "embedding" | "ready" | "failed";
+  step: "downloading" | "processing" | "embedding" | "summarizing" | "ready" | "failed";
   done: number;
   total: number;
   reused?: number; // embedding: unchanged chunks that kept their saved vector (re-index)
+  embedded?: number; // embedding: chunks sent to the AI (kept after the step ends)
   error: string | null;
   startedAt: string;
 }

@@ -1,11 +1,12 @@
 // Indexer (ARCHITECTURE §4.1, §8.3): runs the background job that turns a repo into a searchable index.
 // Steps: Download the zip → Process (pick files and cut them into chunks) → Embed (turn
-// chunks into vectors) → Save. Only one job runs at a time. The UI polls getJob() for progress.
+// chunks into vectors) → Save → Summarize folders (Phase 3). Only one job runs at a time. The UI polls getJob() for progress.
 // Re-index only embeds chunks that changed; unchanged ones keep their saved vectors (reuseEmbeddings.ts).
 import { buildCallGraph, saveCallGraph } from "./callGraph.js";
 import { chunkFile } from "./chunking/index.js";
-import { config } from "./config.js";
+import { config, FOLDER_SUMMARIES } from "./config.js";
 import { AppError } from "./errors.js";
+import { buildFolderSummaries, loadSummaries, saveSummaries } from "./folderSummaries.js";
 import { downloadZipball, getLatestCommitSha, getRepo, toRepoId } from "./githubClient.js";
 import { saveDependencies, scanDependencies } from "./dependencies.js";
 import { buildImportGraph, saveGraph } from "./importGraph.js";
@@ -85,6 +86,7 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
   current.done = 0;
   current.total = plan.toEmbed.length; // the progress bar counts only the chunks that need the AI
   current.reused = plan.reused;
+  current.embedded = plan.toEmbed.length;
   const fresh = await embedDocuments(
     plan.toEmbed.map((c) => c.text),
     (done) => (current.done = done),
@@ -105,6 +107,25 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
     readme: findReadme(files),
   };
   await saveIndex(current.repoId, chunks, vectors, manifest);
+
+  // 4b. Phase 3 folder summaries: a short AI summary per folder, for big-picture questions.
+  // A failure must not fail the index: chat just answers without them.
+  if (FOLDER_SUMMARIES) {
+    current.step = "summarizing";
+    current.done = 0;
+    current.total = 0;
+    try {
+      const previous = await loadSummaries(current.repoId);
+      const summaries = await buildFolderSummaries(files, { repoId: current.repoId, commitSha: sha }, previous, (done, total) => {
+        current.done = done;
+        current.total = total;
+      });
+      await saveSummaries(summaries);
+      console.log(`Folder summaries for ${current.repoId}: ${summaries.folders.length} folders.`);
+    } catch (err) {
+      console.error("Folder summaries failed:", err instanceof Error ? err.message : err);
+    }
+  }
 
   // 5. Phase 4: build the import graph from the same files (local parsing, no AI, a few seconds).
   // A failure here must not fail the index: the graph is rebuilt the first time it's asked for.

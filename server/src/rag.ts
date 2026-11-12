@@ -3,7 +3,7 @@
 //  2. Turn the question into a vector and fetch the 8 closest code chunks, plus keyword matches for any code
 //     names in the question (Phase 2 hybrid search, see hybridSearch.ts). Only from one folder or file
 //     if the user picked one (Phase 2 "Ask about one folder", see scope.ts).
-//  3. Build a prompt: rules + README/file tree + chunks + recent history + the question.
+//  3. Build a prompt: rules + README/file tree + folder summaries (Phase 3) + chunks + recent history + the question.
 //  4. Stream the model's answer back, with the list of sources.
 //  5. F3: after the answer, suggest 3 follow-up questions the user might ask next.
 // Call graph phase 4: if the question names a function (e.g. "who calls searchChunks?"), its callers and
@@ -12,11 +12,12 @@
 // The text of every prompt sent to the AI lives in prompts.ts.
 import { savedCallGraphForChat } from "./callGraph.js";
 import { callGraphContext } from "./callGraphChat.js";
+import { relevantSummaries, summariesForChat } from "./folderSummaries.js";
 import { loadHistory } from "./gitHistory.js";
 import { CHARS_PER_TOKEN, HISTORY_TURNS, MAX_README_TOKENS, MAX_TREE_LINES, NUM_CTX, TOP_K } from "./config.js";
 import { AppError } from "./errors.js";
 import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
-import { CALL_GRAPH_RULES, DEPTH_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, scopeNote, type AnswerDepth } from "./prompts.js";
+import { CALL_GRAPH_RULES, DEPTH_RULES, FOLDER_SUMMARY_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, scopeNote, type AnswerDepth } from "./prompts.js";
 import { resolveScope, scopeFilter, type Scope } from "./scope.js";
 import type { ChatMessage, Chunk, Manifest, Source } from "./types.js";
 import { searchChunks } from "./hybridSearch.js";
@@ -68,16 +69,20 @@ export function buildPrompt(input: {
   depth?: AnswerDepth; // F2: answer style. If not given, "technical" is used.
   scope?: Scope | null; // Phase 2: the folder or file the question is limited to, if any
   callGraph?: string | null; // Call graph phase 4: callers and callees of the functions named in the question
+  folderSummaries?: string | null; // Phase 3: summaries of the folders most related to the question
 }): { messages: ChatTurn[]; usedChunks: Chunk[] } {
   // F2: the main rules, followed by the instructions for the chosen answer style.
   // Call graph phase 4: its rules are added only when there's a CALL GRAPH block, so other answers don't change.
   const rules =
-    `${SYSTEM_RULES}\n\n${DEPTH_RULES[input.depth ?? "technical"]}` + (input.callGraph ? `\n\n${CALL_GRAPH_RULES}` : "");
+    `${SYSTEM_RULES}\n\n${DEPTH_RULES[input.depth ?? "technical"]}` +
+    (input.callGraph ? `\n\n${CALL_GRAPH_RULES}` : "") +
+    (input.folderSummaries ? `\n\n${FOLDER_SUMMARY_RULES}` : "");
   const repoContext =
     `Repository: ${input.manifest.repoId}\n\n` +
     (input.scope ? `${scopeNote(input.scope.kind, input.scope.path)}\n\n` : "") +
     `<<<REPO FILE TREE>>>\n${truncateTree(input.manifest.fileTree)}\n<<<END FILE TREE>>>\n\n` +
     `<<<REPO README>>>\n${truncateReadme(input.manifest.readme) || "(no README)"}\n<<<END README>>>` +
+    (input.folderSummaries ? `\n\n<<<REPO FOLDER SUMMARIES>>>\n${input.folderSummaries}\n<<<END FOLDER SUMMARIES>>>` : "") +
     (input.callGraph ? `\n\n<<<REPO CALL GRAPH>>>\n${input.callGraph}\n<<<END CALL GRAPH>>>` : "");
   const history = recentHistory(input.history);
 
@@ -199,7 +204,10 @@ export async function answer(
   const graph = await savedCallGraphForChat(repoId, manifest.commitSha);
   const gitReport = graph ? ((await loadHistory(repoId))?.report ?? null) : null; // hotspots, for change impact
   const calls = graph ? callGraphContext(graph, `${question}\n${searchQuery}`, scope, gitReport) : null;
-  const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope, callGraph: calls?.text });
+  // Phase 3: the folder summaries closest to the question (same vector as the search, no extra AI call).
+  const summaryFile = await summariesForChat(repoId, manifest.commitSha);
+  const folderSummaries = summaryFile ? relevantSummaries(summaryFile, vector, scope) : null;
+  const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope, callGraph: calls?.text, folderSummaries });
 
   // The call graph's lines are sources too, so citations to them are verified. Chunks first, then those.
   const sources = toSources(usedChunks);

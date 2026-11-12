@@ -62,7 +62,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 
 | Feature | Source | Effort | Notes |
 |---|---|---|---|
-| **Index-time folder summaries** | Opus | M | While indexing, write a short summary of each folder and store it as a searchable document. Big-picture questions then use these summaries. Per folder rather than per file, to stay within Gemini's free-tier limits. |
+| **Index-time folder summaries** ✅ Done | Opus | M | While indexing, write a short summary of each folder and store it as a searchable document. Big-picture questions then use these summaries. Per folder rather than per file, to stay within Gemini's free-tier limits. |
 | **Saved chat history** ✅ Done | PRD | M | Keep conversations per repo across sessions, in SQLite (`better-sqlite3`). The same database can later hold the code graph. |
 | **Incremental re-index** ✅ Done | Opus + Claude Code | M | Re-embed only files whose content changed since the last index. |
 | **Usage and cost display** | Claude Code | S | Show the Gemini tokens used per answer and per index. |
@@ -559,6 +559,35 @@ The AI is also given the exact list, so its "Tech stack" and "Dependencies" text
 | [server/tests/report.test.ts](server/tests/report.test.ts) | 5 tests: grouping, the section (warnings, errors, escaping `\|`), empty and failed scans, the AI prompt, citation clean-up |
 
 **How to demo:** open a repo → **Report** → **Regenerate** → scroll to *Dependencies*. Point out the counts, the per-language table, and the "Tech stack" section quoting the same versions.
+
+### Index-time folder summaries ✅ (Phase 3)
+
+**What:** while indexing, Gemini writes 2-4 sentences about each folder: what it's for, its main files and its key functions. When you ask a question, the 3 summaries closest to it go into the prompt next to the code chunks.
+
+**Why:** search returns 8 code chunks. That works for narrow questions, but broad ones ("what are the main parts?", "where is payment handled?") got answers guessed from scattered snippets. The summaries give the AI an overview of each area.
+
+**How it works:**
+1. `pickFolders()` takes the folders with 2 or more files directly inside, the biggest 40 at most. The root folder is skipped because the README covers it.
+2. `folderInput()` builds what the AI sees for each folder: the file names, then the start of each file, up to 3,000 characters.
+3. Each AI call summarizes 5 folders, and up to 3 calls run at once. The reply uses `### folder` headings, which `parseSummaries()` reads.
+4. Each summary is embedded and saved in `data/summaries/<owner>__<repo>.json`.
+5. **Re-index:** a folder whose input text didn't change keeps its old summary and vector, so it costs no AI calls.
+6. **Chat:** `relevantSummaries()` compares the question's vector (the same one the search uses, so no extra call) with each summary and adds the 3 closest as a `<<<REPO FOLDER SUMMARIES>>>` block. If you picked a folder, only summaries inside it or containing it are used. `FOLDER_SUMMARY_RULES` tells the AI to use them for overview questions, not to cite them as code, and to trust the code if they disagree.
+7. **Safe to fail:** if an AI call fails, it stops and keeps the summaries already written. A full failure doesn't fail the index; chat just answers without summaries. Summaries from an older commit aren't used.
+8. `FOLDER_SUMMARIES=off` in `.env` turns the feature off.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/folderSummaries.ts](server/src/folderSummaries.ts) | **New.** Picks folders, builds summaries, saves and loads them, finds the closest ones |
+| [server/src/indexer.ts](server/src/indexer.ts) | New "summarizing" step after saving the index |
+| [server/src/rag.ts](server/src/rag.ts) | Adds the summaries block and its rules to the prompt |
+| [server/src/prompts.ts](server/src/prompts.ts) | `FOLDER_SUMMARY_PROMPT`, `FOLDER_SUMMARY_RULES` |
+| [server/src/config.ts](server/src/config.ts), [server/src/types.ts](server/src/types.ts) | Limits and the on/off switch; the `summarizing` step and the `embedded` count |
+| [web/src/components/IndexProgress.tsx](web/src/components/IndexProgress.tsx), [web/src/api.ts](web/src/api.ts) | "Summarizing folders n/total" step |
+| [server/tests/folderSummaries.test.ts](server/tests/folderSummaries.test.ts) | **New.** 9 tests: folder picking, size limit, parsing, re-index reuse, failure, ranking, scope |
+
+**How to demo:** re-index a repo (you'll see the new *Summarizing folders* step) → Chat → ask *"What are the main parts of this codebase and what does each do?"*
 
 ### Saved chat history ✅ (Phase 3, from the PRD)
 

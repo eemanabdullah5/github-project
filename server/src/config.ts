@@ -75,3 +75,12 @@ export const HISTORY_TURNS = 3;
 export const MAX_TREE_LINES = 200;
 export const MAX_README_TOKENS = 1500;
 export const NUM_CTX = 16384;
+
+// Phase 3 folder summaries (folderSummaries.ts). FOLDER_SUMMARIES=off in .env turns them off.
+export const FOLDER_SUMMARIES = env("FOLDER_SUMMARIES", "on").toLowerCase() !== "off";
+export const MIN_FILES_PER_FOLDER = 2; // folders with fewer files directly inside are skipped
+export const MAX_FOLDER_SUMMARIES = 40; // the 40 biggest folders at most, to stay within Gemini's free tier
+export const FOLDERS_PER_REQUEST = 5; // folders summarized in one AI call
+export const SUMMARY_CONCURRENCY = 3; // AI calls running at the same time
+export const FOLDER_INPUT_CHARS = 3000; // code sent per folder (file names + the start of each file)
+export const SUMMARIES_IN_PROMPT = 3; // most related summaries added to each chat answer

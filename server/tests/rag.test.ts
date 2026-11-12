@@ -102,3 +102,16 @@ describe("followUpsPrompt", () => {
     expect(whole).not.toContain("limited");
   });
 });
+
+describe("buildPrompt with folder summaries (Phase 3)", () => {
+  it("adds the summaries block and its rules only when there are summaries", () => {
+    const withSummaries = buildPrompt({ question: "q", history: [], chunks: [], manifest, folderSummaries: "src/ (2 files): Login code." }).messages[0].content;
+    expect(withSummaries).toContain("<<<REPO FOLDER SUMMARIES>>>\nsrc/ (2 files): Login code.\n<<<END FOLDER SUMMARIES>>>");
+    expect(withSummaries).toContain("Folder summaries:");
+    expect(withSummaries.indexOf("<<<REPO README>>>")).toBeLessThan(withSummaries.indexOf("<<<REPO FOLDER SUMMARIES>>>\n"));
+
+    const without = buildPrompt({ question: "q", history: [], chunks: [], manifest }).messages[0].content;
+    expect(without).not.toContain("FOLDER SUMMARIES");
+    expect(without).not.toContain("Folder summaries:");
+  });
+});

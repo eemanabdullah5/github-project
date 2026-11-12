@@ -1,5 +1,5 @@
 // Progress panel for indexing (PRD FR-4.2). Asks the server for the job every second and shows
-// Downloading → Processing n/total → Embedding n/total → Ready.
+// Downloading → Processing n/total → Embedding n/total → Summarizing folders n/total → Ready.
 // The job runs on the server, so leaving this view doesn't stop it.
 // On a re-index, it also says how many unchanged chunks were reused instead of embedded again.
 import { Check } from "lucide-react";
@@ -10,6 +10,7 @@ const STEPS: Array<{ key: IndexJob["step"]; label: string }> = [
   { key: "downloading", label: "Downloading" },
   { key: "processing", label: "Processing files" },
   { key: "embedding", label: "Embedding" },
+  { key: "summarizing", label: "Summarizing folders" },
   { key: "ready", label: "Ready" },
 ];
 
@@ -96,9 +97,9 @@ export default function IndexProgress({ onReady, onFailed }: Props) {
         })}
       </ol>
       {/* Re-index: unchanged chunks keep their saved vectors, so only the rest are embedded. */}
-      {!!job?.reused && (job.step === "embedding" || job.step === "ready") && (
+      {!!job?.reused && job.step !== "downloading" && job.step !== "processing" && job.step !== "failed" && (
         <p className="muted small reuse-note">
-          {job.reused} unchanged {job.reused === 1 ? "chunk" : "chunks"} reused · {job.total === 0 ? "nothing new to embed" : `embedding only the ${job.total} new or changed`}
+          {job.reused} unchanged {job.reused === 1 ? "chunk" : "chunks"} reused · {(job.embedded ?? job.total) === 0 ? "nothing new to embed" : `embedding only the ${job.embedded ?? job.total} new or changed`}
         </p>
       )}
       <div className="progress-row">
