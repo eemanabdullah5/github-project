@@ -5,6 +5,9 @@ import { AppError } from "./errors.js";
 import type { CallEdge, CallFunction, CallGraph } from "./callGraph.js";
 import type { HistoryReport } from "./types.js";
 
+/** A "hotspot" is heat 2 or 3 (score 34+). Heat 1 is any file with a score, too common to flag. */
+export const isHotspot = (heat: number) => heat >= 2;
+
 /** Max functions returned per list; the rest are counted. */
 const MAX_LISTED = 200;
 
@@ -98,7 +101,7 @@ export function changeImpact(graph: CallGraph, id: string, history: HistoryRepor
       certain: affected.filter((i) => i.certain).length,
       tests: tests.length,
       files: files.length,
-      hotspotFiles: files.filter((f) => f.hotspot > 0).length,
+      hotspotFiles: files.filter((f) => isHotspot(f.hotspot)).length,
       maxDistance: items.reduce((max, i) => Math.max(max, i.distance), 0),
     },
     more: { affected: Math.max(0, affected.length - MAX_LISTED), tests: Math.max(0, tests.length - MAX_LISTED) },

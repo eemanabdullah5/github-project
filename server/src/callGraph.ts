@@ -107,9 +107,14 @@ interface FileFacts {
   calls: RawCall[];
 }
 
-/** A test file? (tests/…, __tests__/…, *.test.ts, *.spec.js, test_*.py, *_test.py) */
+/** A test file? (tests/…, __tests__/…, *.test.ts, *.spec.js, test.js / tests.py, test_*.py, *_test.py) */
 export function isTestFile(filePath: string): boolean {
-  return /(^|\/)(tests?|__tests__)\//.test(filePath) || /\.(test|spec)\.[jt]sx?$/.test(filePath) || /(^|\/)test_[^/]*\.py$|_test\.py$/.test(filePath);
+  return (
+    /(^|\/)(tests?|__tests__)\//.test(filePath) ||
+    /\.(test|spec)\.[cm]?[jt]sx?$/.test(filePath) ||
+    /(^|\/)tests?\.(?:[cm]?[jt]sx?|py)$/.test(filePath) ||
+    /(^|\/)test_[^/]*\.py$|_test\.py$/.test(filePath)
+  );
 }
 
 /** (find functions)-The name of a function-like node, or null if it isn't one (or is anonymous, like a callback). */

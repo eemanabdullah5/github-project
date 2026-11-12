@@ -19,12 +19,13 @@ import {
 import { ROOT_DIR } from "./config.js";
 import { getDependencies } from "./dependencies.js";
 import { AppError } from "./errors.js";
-import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
+import { getRepo, listAccessibleRepos, listOpenPullRequests, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { analyzeHistory, loadHistory } from "./gitHistory.js";
 import { changeImpact } from "./impact.js";
 import { getGraph, summarizeGraph } from "./importGraph.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import type { AnswerDepth } from "./prompts.js";
+import { analyzePullRequest } from "./prRisk.js";
 import { answer, suggestFollowUps } from "./rag.js";
 import { generateReport, loadReport } from "./report.js";
 import { listFolders } from "./scope.js";
@@ -160,6 +161,18 @@ export function createApp() {
     const graph = await getCallGraph(owner, repo, repoId);
     const history = (await loadHistory(repoId))?.report ?? null;
     res.json({ commitSha: graph.commitSha, ...changeImpact(graph, fn, history) });
+  });
+
+  // PR risk briefing: the newest open pull requests, for the picker.
+  app.get("/api/repos/:owner/:repo/pulls", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await listOpenPullRequests(owner, repo));
+  });
+
+  // PR risk briefing for one pull request: changed functions, impact, tests, risk score with reasons, reviewers.
+  app.get("/api/repos/:owner/:repo/pulls/:number/briefing", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    res.json(await analyzePullRequest(owner, repo, Number(req.params.number)));
   });
 
   // Phase 4: the architecture map (modules, the imports between them, cycles, hotspot colours, Mermaid diagram).

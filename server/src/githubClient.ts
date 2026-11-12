@@ -205,3 +205,118 @@ export async function getCommitFiles(
   const body = (await res.json()) as { files?: Array<{ filename: string; additions: number; deletions: number; status: string }> };
   return (body.files ?? []).map((f) => ({ path: f.filename, added: f.additions, deleted: f.deletions, status: f.status }));
 }
+
+// ---------- PR risk briefing ----------
+
+/** A pull request, as the briefing needs it. */
+export interface PullRequestInfo {
+  number: number;
+  title: string;
+  url: string;
+  author: string; // GitHub login
+  state: "open" | "closed" | "merged";
+  draft: boolean;
+  baseRef: string; // the branch it merges into
+  headSha: string; // the PR's latest commit
+  baseSha: string; // the commit it was compared against
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  updatedAt: string;
+}
+
+/** One file changed by a pull request. `patch` is the diff (missing for binary or very large files). */
+export interface PullRequestFile {
+  path: string;
+  previousPath?: string; // for renamed files
+  status: string; // "added", "modified", "removed", "renamed"…
+  additions: number;
+  deletions: number;
+  patch?: string;
+}
+
+type GitHubPull = {
+  number: number;
+  title: string;
+  html_url: string;
+  user: { login: string } | null;
+  state: "open" | "closed";
+  merged_at: string | null;
+  draft?: boolean;
+  base: { ref: string; sha: string };
+  head: { sha: string };
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+  updated_at: string;
+};
+
+function toPullRequest(p: GitHubPull): PullRequestInfo {
+  return {
+    number: p.number,
+    title: p.title,
+    url: p.html_url,
+    author: p.user?.login ?? "",
+    state: p.merged_at ? "merged" : p.state,
+    draft: !!p.draft,
+    baseRef: p.base.ref,
+    headSha: p.head.sha,
+    baseSha: p.base.sha,
+    additions: p.additions ?? 0,
+    deletions: p.deletions ?? 0,
+    changedFiles: p.changed_files ?? 0,
+    updatedAt: p.updated_at,
+  };
+}
+
+/** One pull request. */
+export async function getPullRequest(owner: string, repo: string, number: number): Promise<PullRequestInfo> {
+  const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${number}`);
+  return toPullRequest((await res.json()) as GitHubPull);
+}
+
+/** The newest open pull requests (for the picker). */
+export async function listOpenPullRequests(owner: string, repo: string, max = 30): Promise<PullRequestInfo[]> {
+  const res = await githubFetch(`/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=${Math.min(max, PER_PAGE)}`);
+  return ((await res.json()) as GitHubPull[]).map(toPullRequest);
+}
+
+/** The files a pull request changes, with their diffs. GitHub lists at most 3,000; we read up to `max`. */
+export async function getPullRequestFiles(owner: string, repo: string, number: number, max = 300): Promise<PullRequestFile[]> {
+  const files: PullRequestFile[] = [];
+  for (let page = 1; files.length < max; page++) {
+    const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${number}/files?per_page=${PER_PAGE}&page=${page}`);
+    const batch = (await res.json()) as Array<{
+      filename: string;
+      previous_filename?: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      patch?: string;
+    }>;
+    for (const f of batch) {
+      files.push({ path: f.filename, previousPath: f.previous_filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch });
+    }
+    if (batch.length < PER_PAGE) break;
+  }
+  return files.slice(0, max);
+}
+
+/** Logins of people who recently changed a file (newest first, bots left out). Used to suggest reviewers. */
+export async function recentFileAuthors(owner: string, repo: string, path: string, max = 30): Promise<string[]> {
+  const res = await githubFetch(`/repos/${owner}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=${Math.min(max, PER_PAGE)}`);
+  const commits = (await res.json()) as Array<{ author: { login: string; type?: string } | null }>;
+  return commits.map((c) => c.author).filter((a) => a && a.type !== "Bot" && !a.login.endsWith("[bot]")).map((a) => a!.login);
+}
+
+/** A file's text at a commit, or null if it doesn't exist there (or is too big for the API). */
+export async function getFileAtRef(owner: string, repo: string, path: string, ref: string): Promise<string | null> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  try {
+    const res = await githubFetch(`/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`);
+    const body = (await res.json()) as { encoding?: string; content?: string };
+    return body.encoding === "base64" && body.content ? Buffer.from(body.content, "base64").toString("utf8") : null;
+  } catch {
+    return null;
+  }
+}

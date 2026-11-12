@@ -2140,3 +2140,61 @@ button.info-button[aria-expanded="true"] {
 .info-text {
   white-space: pre-line;
 }
+
+/* ---------- PR risk tab (components/PrRisk.tsx) ---------- */
+
+.pr-risk {
+  border-left-width: 4px;
+}
+.pr-risk.low { border-left-color: var(--ok); }
+.pr-risk.medium { border-left-color: var(--warn); }
+.pr-risk.high { border-left-color: var(--error); }
+
+.pr-risk-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pr-risk-head .help-heading {
+  margin: 0;
+  font-size: 16px;
+}
+
+.pr-level {
+  padding: 4px 12px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.pr-level.low { color: var(--ok); }
+.pr-level.medium { color: var(--warn); }
+.pr-level.high { color: var(--error); }
+
+.pr-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pr-reasons li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+}
+
+.pr-points {
+  flex-shrink: 0;
+  min-width: 28px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.pr-add { color: var(--ok); font-family: var(--font-mono); }
+.pr-del { color: var(--error); font-family: var(--font-mono); }

@@ -77,7 +77,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Hidden coupling** ✅ Done | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
 | **Call graph** ✅ Graph, Calls tab and chat (report hook to do) | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
 | **Change impact** ✅ Calls tab and chat | Opus | M | For a changed function: what depends on it, and which tests reach it. |
-| **PR risk briefing** | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
+| **PR risk briefing** ✅ Done | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
 
 ## Later
 
@@ -90,6 +90,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | Decision archaeology ("why does this code exist?") | Opus | Needs PR and issue data as well as commits. |
 | Branch selection | Claude Code | Useful, but not asked for yet. |
 | Org repo access | Claude Code | Blocked on the senior decision about tokens (D15). |
+| Sign in with GitHub | Claude Code | Each person logs into the app with their own GitHub account (OAuth) and sees only the repos and PRs they can access, with no shared token in `.env`. Needed once a team (e.g. leads, CTO) uses one shared install; until then, each person runs the app with their own token (see README). Agreed for later (2026-11-12). |
 | Names in the knowledge map | Opus | Needs senior / HR approval. |
 | Evaluation auto mode (`npm run eval -- --auto owner/repo`) | Claude Code | Generate ~20 test questions for any indexed repo (exact-name ones from function names, plain ones with Gemini) and save them to `questions.json` for review. Today only the 2 repos with hand-written questions are tested. Agreed to build later. |
 | Answer feedback (👍 / 👎) | Claude Code | Buttons under each answer, saved with the chat; shows the share marked helpful and lists the 👎 ones. Measures real answer quality from real use. No AI calls. Suggested first of the three. |
@@ -721,3 +722,38 @@ Embedding all 576 from scratch would take about 6 minutes at the same rate. Sear
 | [web/src/components/CallGraph.tsx](web/src/components/CallGraph.tsx), [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | Shows it under the call lists; types; styles |
 
 **Chat:** questions about changing, risk or tests ("what breaks if I change `buildPrompt`?", "is `vectorStore.query` tested?") add an *If it changes* part to the call graph block: affected functions and files, hotspots, entry points, and the tests that reach it, or a clear "no test reaches it". Code: `wantsImpact()` and `impactLines()` in [server/src/callGraphChat.ts](server/src/callGraphChat.ts); the rule is in `CALL_GRAPH_RULES`.
+
+### PR risk briefing ✅ (Phase 4)
+
+**What:** for one pull request: the functions it changes, how far that spreads (change impact for each, together), the tests that reach it and the ones it doesn't, hotspots, files that usually change with the changed ones but are missing, folders only one person knows, a risk score where every point has a written reason, and suggested reviewers.
+
+**How:**
+1. GitHub gives the PR and its files with diffs. `changedLines()` reads each diff's new-file line numbers; `functionsAtLines()` maps them to the innermost function.
+2. The call graph is built from the **PR's own head commit** (cached for the last 5 PRs), so lines and names match. If that can't be downloaded (e.g. from a fork), the indexed graph is used and a note says so.
+3. `changeImpact()` runs for each changed function; the results are combined.
+4. `scoreRisk()`: fixed rules, each adding points with a reason: size (+1/+2), spread (+1/+2), changed functions no test reaches (+2), code changed without tests (+1), hotspots (+1, or +2 for the hottest), missing co-change partners (+1), single-contributor folders (+1). 0–2 low, 3–5 medium, 6+ high.
+5. Reviewers: people who recently changed the PR's busiest existing code files (from GitHub's commit list; bots and the PR author left out; nothing stored).
+
+**Complexity before → after:** for each changed function, complexity is measured in the PR's code (already downloaded) and in the base version (fetched from GitHub, up to 20 files), matched by line in the new code and by name in the old. A rule adds +1 if a function's complexity rises by 5+ (or a new one is 10+), or +2 if it reaches 25+, with the reason naming it ("createApp() complexity 0 → 26"). `measureFunctions()` in complexity.ts, `scoreFor()` and `measureChanges()` in prRisk.ts.
+
+**History age:** the briefing shows when git history was analysed, with a note if it's over 30 days old. History describes the code before the PR on purpose: the PR is compared against it, and its own commits count once merged and history is refreshed.
+
+**Also changed:** "hotspot" now means heat 2–3 (score 34+) everywhere, in change impact too. Heat 1 is any file with a score, which on a busy repo is nearly every file.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/prRisk.ts](server/src/prRisk.ts) | **New.** `parsePrInput()`, `changedLines()`, `functionsAtLines()`, `scoreRisk()`, `buildBriefing()`, `pickReviewers()`, `analyzePullRequest()` |
+| [server/src/githubClient.ts](server/src/githubClient.ts) | `getPullRequest()`, `listOpenPullRequests()`, `getPullRequestFiles()`, `recentFileAuthors()` |
+| [server/src/app.ts](server/src/app.ts) | `GET /api/repos/:owner/:repo/pulls` and `/pulls/:number/briefing` |
+| [server/src/impact.ts](server/src/impact.ts) | `isHotspot()` |
+| [server/tests/prRisk.test.ts](server/tests/prRisk.test.ts) | **New.** 11 tests |
+
+**Phase 2, the PR risk tab:** paste a PR link or number (or click an open PR), then see the risk level with each reason and its points, headline numbers, untested changed functions, changed functions with links, suggested reviewers, files usually changed with these, the file list, and notes on anything that couldn't be checked. Every section has an ⓘ (texts in `HELP.pr`, [web/src/helpTexts.ts](web/src/helpTexts.ts)).
+
+| File | What changed |
+|---|---|
+| [web/src/components/PrRisk.tsx](web/src/components/PrRisk.tsx) | **New.** The tab |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx) | The *PR risk* tab |
+| [web/src/api.ts](web/src/api.ts) | `listPullRequests()`, `getPrBriefing()`, types |
+| [web/src/helpTexts.ts](web/src/helpTexts.ts), [web/src/index.css](web/src/index.css) | Help texts; styles |

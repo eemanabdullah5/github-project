@@ -107,6 +107,11 @@ export function personIds(commits: Array<{ sha: string; login: string; name: str
   return ids;
 }
 
+/** A file's area for knowledge risk: "src/auth/login.ts" → "src"; top-level files → "(root files)". */
+export function areaOf(path: string): string {
+  return path.includes("/") ? path.split("/")[0] : "(root files)";
+}
+
 // Works out the whole report from the commits and the current files.
 // It doesn't use the network or the disk, so it's easy to test.
 //  - Only files that still exist are scored (deleted files can't be hotspots).
@@ -194,8 +199,7 @@ export function computeReport(
   for (const commit of commits) {
     for (const f of commit.files) {
       if (!current.has(f.path)) continue;
-      // "src/auth/login.ts" → "src". Files at the top level are grouped as "(root files)".
-      const area = f.path.includes("/") ? f.path.split("/")[0] : "(root files)";
+      const area = areaOf(f.path);
       const entry = perArea.get(area) ?? { commits: new Set(), authors: new Set(), files: new Set() };
       entry.commits.add(commit.sha);
       entry.authors.add(commit.author);

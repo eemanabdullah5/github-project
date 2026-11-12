@@ -55,7 +55,7 @@ const FUNCTION_VALUES = new Set([
 const CLASSES = new Set(["class_declaration", "class_definition", "class", "interface_declaration"]);
 
 // One function's result while walking the file.
-interface FunctionScore {
+export interface FunctionScore {
   name: string;
   line: number; // 1-based
   endLine: number;
@@ -226,5 +226,19 @@ export async function measureComplexity(file: SourceFile): Promise<FileComplexit
     return { complexity: top.complexity, method: "syntax", topFunction: top };
   } finally {
     tree.delete(); // tree-sitter trees live in WebAssembly memory, so free them
+  }
+}
+
+/** Every function's complexity in a file, or null if it can't be parsed (unsupported language or syntax error). */
+export async function measureFunctions(file: SourceFile): Promise<FunctionScore[] | null> {
+  const spec = LANGUAGES[file.language];
+  if (!spec) return null;
+  const parser = await getParser(file.language, spec);
+  const tree = parser.parse(file.text);
+  if (!tree) return null;
+  try {
+    return tree.rootNode.hasError ? null : scoreFunctions(tree.rootNode);
+  } finally {
+    tree.delete();
   }
 }

@@ -52,4 +52,20 @@ export const HELP = {
     files:
       "The files the affected functions are in, plus this function's own file. Hotspots (files that change often and are complex, from the Hotspots tab) come first.",
   },
+  // PR risk tab
+  pr: {
+    risk:
+      "Each rule that applies adds points, shown with its reason. 0–2 points = low, 3–5 = medium, 6 or more = high.\nRules: size (+1 over 200 lines, +2 over 500) · spread (+1 if 8+ functions depend on the changes, +2 if 25+) · changed functions no test reaches (+2) · code changed without test files (+1) · hotspot files (+1, +2 for a top hotspot) · a file that usually changes with these is missing (+1) · code only one person knows (+1) · a function gets much harder to follow (+1 if its complexity rises by 5+ or a new one is 10+; +2 if it reaches 25+).",
+    changedFunctions:
+      "Functions whose lines this PR adds, changes or deletes, found by matching the diff to the PR's own code. Affected = how many other functions depend on it; tests = how many tests reach it; complexity = how hard it is to follow, before → after this PR (red when it rose by 5 or more).",
+    affected:
+      "Other functions that depend on the changed code, directly or through other functions. Functions changed in the PR itself aren't counted.",
+    untested:
+      "Changed functions that no test reaches, directly or through other functions. A mistake in them wouldn't be caught by the test suite.",
+    partners:
+      "Files that changed together with a changed file in at least half of its past commits, but aren't in this PR. Worth checking that nothing was forgotten.",
+    reviewers:
+      "People who recently changed the PR's busiest files, so they likely know that code. The PR author and bots are left out. Nothing is stored.",
+    files: "Every file the PR changes. Hotspot = a file that changes often and is complex (from the Hotspots tab). No diff = GitHub didn't send the changes (binary or very large).",
+  },
 };

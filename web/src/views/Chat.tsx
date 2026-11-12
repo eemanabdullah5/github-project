@@ -8,6 +8,7 @@
 // F5: a "Report" tab shows a one-page health report that can be downloaded.
 // Phase 4: an "Architecture" tab shows the module map built from the import graph.
 // Call graph: a "Calls" tab shows who calls a function and what it calls, as a diagram and lists.
+// PR risk: a "PR risk" tab gives a pull request's risk score with reasons, what it changes and reviewers.
 // Phase 2: "Search in" limits a question to one folder or file; each question shows where it searched.
 // Saved chat history: chats are saved per repo. "New chat" starts a fresh one, the bin deletes the one on screen,
 // and "Past chats" opens a saved chat or deletes several at once (components/PastChats.tsx).
@@ -37,6 +38,7 @@ import Hotspots from "../components/Hotspots";
 import IndexProgress from "../components/IndexProgress";
 import { useConfirm } from "../components/ConfirmDialog";
 import PastChats from "../components/PastChats";
+import PrRisk from "../components/PrRisk";
 import { CitationWarning, markdownComponents } from "../components/CitationLink";
 import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
 
@@ -79,7 +81,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
   const [error, setError] = useState("");
   const [reindexing, setReindexing] = useState(false);
   const [depth, setDepth] = useState<AnswerDepth>(initialDepth); // F2: the selected answer style
-  const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "calls" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
+  const [tab, setTab] = useState<"chat" | "hotspots" | "architecture" | "calls" | "prs" | "report">("chat"); // F4/F5/Phase 4: which tab is showing
   const [scope, setScope] = useState(""); // Phase 2: folder or file to search in ("" = the whole repo)
   const [chats, setChats] = useState<ChatSummary[]>([]); // saved chats for the "Past chats" list
   const [confirm, confirmDialog] = useConfirm(); // the app's own "Are you sure?" dialog
@@ -302,6 +304,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
                 ["hotspots", "Hotspots"],
                 ["architecture", "Architecture"],
                 ["calls", "Calls"],
+                ["prs", "PR risk"],
                 ["report", "Report"],
               ] as const
             ).map(([key, label]) => (
@@ -331,6 +334,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
       {tab === "hotspots" && <Hotspots repo={repo} />}
       {tab === "architecture" && <Architecture repo={repo} />}
       {tab === "calls" && <CallGraph repo={repo} />}
+      {tab === "prs" && <PrRisk repo={repo} />}
       {tab === "report" && <HealthReport repo={repo} />}
 
       {/* Everything below is the Chat tab. */}

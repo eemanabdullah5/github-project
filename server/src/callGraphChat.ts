@@ -3,7 +3,7 @@
 // For "what breaks if I change X?" or "is X tested?", it also adds X's change impact (impact.ts).
 import { focusGraph, listFunctions, type CallFunction, type CallGraph, type FocusItem } from "./callGraph.js";
 import { codeNames } from "./hybridSearch.js";
-import { changeImpact, type ImpactItem } from "./impact.js";
+import { changeImpact, isHotspot, type ImpactItem } from "./impact.js";
 import type { Scope } from "./scope.js";
 import type { HistoryReport, Source } from "./types.js";
 
@@ -163,7 +163,7 @@ function impactLines(
     const shown = further.slice(0, MAX_IMPACT_LISTED);
     lines.push(`- Further callers: ${byDistance(shown)}${further.length > shown.length ? ` …and ${further.length - shown.length} more` : ""}`);
   }
-  const hotFiles = impact.files.filter((f) => f.hotspot > 0).map((f) => f.file);
+  const hotFiles = impact.files.filter((f) => isHotspot(f.hotspot)).map((f) => f.file);
   if (hotFiles.length) lines.push(`- Hotspot files reached: ${hotFiles.join(", ")}`);
   if (impact.entryPoints.length) {
     const entries = impact.entryPoints.slice(0, MAX_IMPACT_LISTED).map((i) => `${title(i.fn)} in ${i.fn.file}`);

@@ -145,10 +145,10 @@ def test_respond():
 
 describe("isTestFile", () => {
   it("recognises the usual test file names and folders", () => {
-    for (const p of ["tests/test_a.py", "test_a.py", "a_test.py", "src/a.test.ts", "web/b.spec.js", "src/__tests__/c.ts"]) {
+    for (const p of ["tests/test_a.py", "test_a.py", "a_test.py", "src/a.test.ts", "web/b.spec.js", "src/__tests__/c.ts", "test.js", "pkg/test.ts", "tests.py", "a.test.mjs"]) {
       expect(isTestFile(p), p).toBe(true);
     }
-    for (const p of ["src/app.ts", "agents.py", "src/testing.ts", "contest.py"]) expect(isTestFile(p), p).toBe(false);
+    for (const p of ["src/app.ts", "agents.py", "src/testing.ts", "contest.py", "latest.js", "src/attest.ts"]) expect(isTestFile(p), p).toBe(false);
   });
 });
 

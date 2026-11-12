@@ -132,7 +132,7 @@ export default function ChangeImpact({ repo, fnId, nameOf, lineUrl, onGo }: Prop
                   <li key={f.file}>
                     <div className="calls-item-main">
                       <code>{f.file}</code>
-                      {f.hotspot > 0 && <span className="warn-pill small-pill">hotspot</span>}
+                      {f.hotspot >= 2 && <span className="warn-pill small-pill">hotspot</span>}
                       {f.file === target.file && <span className="muted-pill small-pill">its own file</span>}
                     </div>
                     <span className="muted small">{f.functions ? `${f.functions} affected` : ""}</span>

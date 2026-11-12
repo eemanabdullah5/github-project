@@ -332,6 +332,61 @@ export function getCallImpact(owner: string, name: string, fn: string): Promise<
   return request(`${repoPath(owner, name)}/calls/impact?fn=${encodeURIComponent(fn)}`);
 }
 
+// ---------- PR risk briefing (same shapes as server/src/prRisk.ts) ----------
+
+export interface PullRequestInfo {
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  state: "open" | "closed" | "merged";
+  draft: boolean;
+  baseRef: string;
+  headSha: string;
+  baseSha: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  updatedAt: string;
+}
+
+export interface PrFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  isTest: boolean;
+  isCode: boolean;
+  hotspot: 0 | 1 | 2 | 3;
+  functions: string[];
+  noDiff: boolean;
+}
+
+export interface PrBriefing {
+  pr: PullRequestInfo;
+  graphFrom: "pr" | "indexed";
+  files: PrFile[];
+  changedFunctions: Array<{ fn: CallFunction; affected: number; tests: number; maxDistance: number; complexity?: { before: number | null; after: number } }>;
+  affected: { functions: number; files: number; hotspotFiles: string[]; entryPoints: CallFunction[] };
+  tests: { changedTestFiles: string[]; reaching: CallFunction[]; untested: CallFunction[] };
+  missingPartners: Array<{ changed: string; partner: string; count: number; percent: number }>;
+  knowledgeRisk: string[];
+  risk: { score: number; level: "low" | "medium" | "high"; reasons: Array<{ points: number; text: string }> };
+  reviewers: Array<{ login: string; files: number }>;
+  historyDate: string | null; // when the git history was analysed
+  notes: string[];
+}
+
+/** The newest open pull requests. */
+export function listPullRequests(owner: string, name: string): Promise<PullRequestInfo[]> {
+  return request(`${repoPath(owner, name)}/pulls`);
+}
+
+/** The risk briefing for one pull request. */
+export function getPrBriefing(owner: string, name: string, number: number): Promise<PrBriefing> {
+  return request(`${repoPath(owner, name)}/pulls/${number}/briefing`);
+}
+
 // ---------- Saved chat history (same shapes as server/src/chatHistory.ts) ----------
 
 /** One saved chat, as shown in the "Past chats" list. */

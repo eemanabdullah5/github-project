@@ -47,7 +47,7 @@ With a suitable GPU, use a bigger chat model, such as `qwen2.5-coder:7b` (about 
 Create a **fine-grained** personal access token at GitHub → Settings → Developer settings → Fine-grained tokens:
 
 - **Repository access:** the repos (or all repos) you want to analyse
-- **Permissions:** *Contents: Read-only* and *Metadata: Read-only*
+- **Permissions:** *Contents: Read-only*, *Metadata: Read-only* and *Pull requests: Read-only* (for the PR risk tab on private repos)
 
 Don't use a classic token. Reading private repos with one needs the `repo` scope, which also gives write access.
 
@@ -98,6 +98,12 @@ For normal use without the dev server, run `npm run build`, then `npm start -w s
    - Has new commits since indexing: the app asks whether to re-index.
 3. **Chat:** click a starter question or type your own. Under each answer, click *Sources* to see the files and lines it used. *Clear chat* resets the conversation, and *Re-index* rebuilds the index.
 4. Use the 🌙/☀️ button in the header to switch between light and dark themes.
+
+### Checking someone else's repos (e.g. a lead or CTO)
+
+The app sees exactly what the token in `.env` can see; your browser's GitHub login isn't used. To analyse repos or PRs your account can't access, the person who has access runs the app on their own machine with **their own** token in their own `.env`. Don't share tokens or put someone else's token in your `.env`.
+
+Indexing and chat send code to the AI provider. For a company's private repos, check that this is allowed, or use `LLM_PROVIDER=ollama` to keep everything on the machine.
 
 Limits: up to 1,000 repos in the list, and up to 1,000 files or 20 MB of code per indexed repo. Only one repo can be indexed at a time.
 
