@@ -21,6 +21,7 @@ import { getDependencies } from "./dependencies.js";
 import { AppError } from "./errors.js";
 import { getRepo, listAccessibleRepos, parseRepoUrl, toRepoId } from "./githubClient.js";
 import { analyzeHistory, loadHistory } from "./gitHistory.js";
+import { changeImpact } from "./impact.js";
 import { getGraph, summarizeGraph } from "./importGraph.js";
 import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import type { AnswerDepth } from "./prompts.js";
@@ -148,6 +149,17 @@ export function createApp() {
     const view = focusGraph(graph, fn, depth);
     const history = (await loadHistory(repoId))?.report ?? null;
     res.json({ commitSha: graph.commitSha, ...view, mermaid: focusMermaid(view, history) });
+  });
+
+  // Change impact: everything that calls a function, directly or not, and the tests that reach it. ?fn=<function id>
+  app.get("/api/repos/:owner/:repo/calls/impact", async (req, res) => {
+    const { owner, repo } = repoParams(req);
+    const fn = typeof req.query.fn === "string" ? req.query.fn : "";
+    if (!fn) throw new AppError("Pick a function.", 400);
+    const repoId = toRepoId(owner, repo);
+    const graph = await getCallGraph(owner, repo, repoId);
+    const history = (await loadHistory(repoId))?.report ?? null;
+    res.json({ commitSha: graph.commitSha, ...changeImpact(graph, fn, history) });
   });
 
   // Phase 4: the architecture map (modules, the imports between them, cycles, hotspot colours, Mermaid diagram).

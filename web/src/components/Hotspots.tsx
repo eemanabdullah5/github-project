@@ -7,6 +7,8 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { analyzeHotspots, getHotspots, type HistoryReport, type HotspotFile, type Repo } from "../api";
 import { githubLineUrl, type LinkTarget } from "../sourceLinks";
+import { InfoHeading, InfoText, useInfo } from "./InfoHelp";
+import { HELP } from "../helpTexts";
 
 // How many files the chart and the table show.
 const CHART_FILES = 10;
@@ -145,7 +147,12 @@ export default function Hotspots({ repo }: Props) {
       <div className="stat-row">
         <Stat label="Commits analysed" value={report.commitsAnalyzed} />
         <Stat label="Files changed" value={report.filesChanged} />
-        <Stat label="Areas with one contributor" value={riskyAreas.length} warn={riskyAreas.map((a) => a.area).join(", ")} />
+        <Stat
+          label="Areas with one contributor"
+          value={riskyAreas.length}
+          warn={riskyAreas.map((a) => a.area).join(", ")}
+          help={HELP.hotspots.oneContributor}
+        />
       </div>
 
       {report.commitsAnalyzed === 0 && <p className="muted">No commits in the last 12 months, so there's nothing to show.</p>}
@@ -157,12 +164,12 @@ export default function Hotspots({ repo }: Props) {
       {chartFiles.length > 0 && (
         <section className="panel chart-card" aria-labelledby="hs-top">
           <div className="section-head">
-            <h2 id="hs-top">Top hotspots</h2>
-            <p>Hotspot score = how often a file changes × how complex it is. The top hotspot is 100. It shows where to look first, not a measured bug risk.</p>
-            <p className="muted small">
-              Complexity = the cognitive complexity of the file's most complex function: each if, loop, catch or "? :" adds 1,
-              plus 1 more for each level it's nested. ≈ means estimated (no parser for that language).
-            </p>
+            <InfoHeading
+              level={2}
+              id="hs-top"
+              title="Top hotspots"
+              help={HELP.hotspots.topHotspots}
+            />
             {oldComplexity && (
               <p className="muted small" role="note">
                 These scores were measured the old way (decision words across the whole file). Click Refresh to measure each
@@ -178,7 +185,12 @@ export default function Hotspots({ repo }: Props) {
       {report.files.length > 0 && (
         <section className="section" aria-labelledby="hs-all">
           <div className="section-head">
-            <h2 id="hs-all">All changed files</h2>
+            <InfoHeading
+              level={2}
+              id="hs-all"
+              title="All changed files"
+              help={HELP.hotspots.allFiles}
+            />
           </div>
           <div className="card table-wrap">
             <table className="data-table">
@@ -242,8 +254,12 @@ export default function Hotspots({ repo }: Props) {
         {/* 4. Files that change together */}
         <section className="section" aria-labelledby="hs-pairs">
           <div className="section-head">
-            <h2 id="hs-pairs">Files that change together</h2>
-            <p>Often changed in the same commit. This can mean a hidden dependency between them.</p>
+            <InfoHeading
+              level={2}
+              id="hs-pairs"
+              title="Files that change together"
+              help={HELP.hotspots.changeTogether}
+            />
           </div>
           {report.coChange.length === 0 ? (
             <p className="card list-message">No pair of files changed together 3 or more times.</p>
@@ -268,8 +284,12 @@ export default function Hotspots({ repo }: Props) {
         {/* 5. Knowledge risk: no names, only counts */}
         <section className="section" aria-labelledby="hs-areas">
           <div className="section-head">
-            <h2 id="hs-areas">Knowledge risk</h2>
-            <p>How many different people changed each top-level folder. No names are shown or stored.</p>
+            <InfoHeading
+              level={2}
+              id="hs-areas"
+              title="Knowledge risk"
+              help={HELP.hotspots.knowledgeRisk}
+            />
           </div>
           <div className="card table-wrap">
             <table className="data-table">
@@ -313,14 +333,19 @@ export default function Hotspots({ repo }: Props) {
 }
 
 // One headline number with its label (and, optionally, which areas need attention).
-export function Stat({ label, value, warn }: { label: string; value: number; warn?: string }) {
+export function Stat({ label, value, warn, help }: { label: string; value: number; warn?: string; help?: string }) {
+  const info = useInfo(label);
   return (
     <div className="card stat">
-      <span className="stat-label">{label}</span>
+      <span className="stat-label">
+        {label}
+        {help && info.button}
+      </span>
       <span className="row">
         <span className="stat-value">{value.toLocaleString()}</span>
         {warn && <span className="warn-pill">⚠ {warn}</span>}
       </span>
+      {help && info.open && <InfoText id={info.id}>{help}</InfoText>}
     </div>
   );
 }

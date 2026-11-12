@@ -2,6 +2,7 @@
 //  1. headline numbers   2. pick a function (search box, or a "most called" button)   3. depth 1 or 2
 //  4. the diagram: callers → the function → callees (Mermaid, like the architecture map)
 //  5. the same callers and callees as lists, with links to the exact line on GitHub
+//  6. change impact: what a change to it affects, and which tests reach it (ChangeImpact.tsx)
 // Navigation: every function in the lists has a "Show its calls" button that moves the diagram to it,
 // and "Back" returns to the previous one. Why buttons, not clicks on the diagram boxes: clicking inside the
 // diagram would need Mermaid's less strict security mode, which we keep off so repo text can't run as code.
@@ -9,8 +10,11 @@ import { AlertCircle, ArrowLeft, Crosshair } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getCallFocus, getCallFunctions, type CallFocus, type CallFunction, type CallGraphStats, type FocusItem, type Repo } from "../api";
 import { githubLineUrl, type LinkTarget } from "../sourceLinks";
+import ChangeImpact from "./ChangeImpact";
 import { Stat } from "./Hotspots";
 import MermaidDiagram from "./MermaidDiagram";
+import { InfoHeading } from "./InfoHelp";
+import { HELP } from "../helpTexts";
 
 interface Props {
   repo: Repo;
@@ -128,8 +132,16 @@ export default function CallGraph({ repo }: Props) {
       {stats && (
         <div className="stat-row">
           <Stat label="Functions" value={functions.length} />
-          <Stat label="Calls matched" value={stats.certain} />
-          <Stat label="Possible calls" value={stats.possible} />
+          <Stat
+            label="Calls matched"
+            value={stats.certain}
+            help={HELP.calls.callsMatched}
+          />
+          <Stat
+            label="Possible calls"
+            value={stats.possible}
+            help={HELP.calls.possibleCalls}
+          />
         </div>
       )}
 
@@ -192,13 +204,21 @@ export default function CallGraph({ repo }: Props) {
           {/* 4. The diagram */}
           <section className="panel arch-card" aria-labelledby="calls-diagram">
             <div className="section-head">
-              <h2 id="calls-diagram">
-                {shortName(view.center)}{" "}
-                <a className="muted small" href={lineUrl(view.center.file, view.center.line)} target="_blank" rel="noopener noreferrer">
-                  {view.center.file}:L{view.center.line}
-                </a>
-              </h2>
-              <p>Left: the functions that call it. Right: the functions it calls. Arrows point from the caller to the function it calls.</p>
+              <InfoHeading
+                level={2}
+                id="calls-diagram"
+                label={shortName(view.center)}
+                title={
+                  <>
+                    {shortName(view.center)}{" "}
+                    <a className="muted small" href={lineUrl(view.center.file, view.center.line)} target="_blank" rel="noopener noreferrer">
+                      {view.center.file}:L{view.center.line}
+                    </a>
+                  </>
+                }
+                help={HELP.calls.diagram}
+              />
+              <p>Callers on the left → this function → what it calls on the right.</p>
             </div>
             {view.callers.length === 0 && view.callees.length === 0 ? (
               <p className="muted">Nothing in the repo calls this function, and it doesn't call any other function in the repo.</p>
@@ -229,6 +249,9 @@ export default function CallGraph({ repo }: Props) {
             <CallList title="Called by" empty="Nothing in the repo calls it." items={view.callers} more={view.more.callers} nameOf={nameOf} lineUrl={lineUrl} onGo={go} callers />
             <CallList title="Calls" empty="It doesn't call any other function in the repo." items={view.callees} more={view.more.callees} nameOf={nameOf} lineUrl={lineUrl} onGo={go} />
           </div>
+
+          {/* 6. Change impact */}
+          <ChangeImpact repo={repo} fnId={view.center.id} nameOf={nameOf} lineUrl={lineUrl} onGo={go} />
         </>
       )}
 

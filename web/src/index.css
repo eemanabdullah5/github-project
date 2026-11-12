@@ -2048,3 +2048,95 @@ button.calls-go {
   font-size: 11px;
   margin-left: 4px;
 }
+
+/* ---------- Change impact (components/ChangeImpact.tsx) ---------- */
+
+.impact-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.impact-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.impact-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.impact-group summary {
+  padding: 8px 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The ⓘ button (InfoHelp.tsx) and the explanation it opens. */
+.help-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+button.info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+}
+
+button.info-button:hover,
+button.info-button[aria-expanded="true"] {
+  border-color: var(--border);
+  color: var(--accent-text);
+}
+
+.info-text {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ⓘ next to a headline number's label. */
+.stat-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat .info-text {
+  margin: 4px 0 0;
+}
+
+/* ⓘ text under a section heading: a little space from the heading. */
+.section-head .info-text {
+  margin: 6px 0 0;
+}
+
+/* Line breaks in a help text (helpTexts.ts) start a new line. */
+.info-text {
+  white-space: pre-line;
+}

@@ -76,7 +76,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Architecture map** ✅ Done | Opus | M–L | A zoomable module diagram with hotspot overlay, plus cycle detection. |
 | **Hidden coupling** ✅ Done | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
 | **Call graph** ✅ Graph, Calls tab and chat (report hook to do) | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
-| **Change impact** | Opus | M | For a changed function: what depends on it, and which tests reach it. |
+| **Change impact** ✅ Calls tab (chat hook to do) | Opus | M | For a changed function: what depends on it, and which tests reach it. |
 | **PR risk briefing** | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
 
 ## Later
@@ -704,3 +704,20 @@ Embedding all 576 from scratch would take about 6 minutes at the same rate. Sear
 | [server/tests/callGraphChat.test.ts](server/tests/callGraphChat.test.ts) | **New.** 11 tests: name finding, matching and ties, the block text, sources, the prompt with and without a block |
 
 **How to demo:** open a repo indexed after the call graph was added (or re-index it) → Chat → ask *"Who calls `searchChunks`?"* → the answer lists every caller with links; open **Sources** to see the call lines. Ask *"and what does it call?"* as a follow-up.
+
+### Change impact ✅ (Phase 4, Calls tab)
+
+**What:** for the function picked in the Calls tab, an *If you change it* section shows everything that calls it, directly or through other functions, grouped by steps away; the tests that reach it (with a warning when none do); the entry points it reaches (code nothing else calls, like routes and scripts); and the files touched, hotspots first.
+
+**How:** `changeImpact()` follows callers backwards through the call graph (breadth-first, so each function gets its shortest path). It walks twice: once with certain calls only, once with all calls. Functions only reachable through a "possible" call are marked possible. Test functions are listed separately. Hotspot heat comes from the saved history, if analysed.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/impact.ts](server/src/impact.ts) | **New.** `changeImpact()` |
+| [server/src/app.ts](server/src/app.ts) | `GET /api/repos/:owner/:repo/calls/impact?fn=` |
+| [server/tests/impact.test.ts](server/tests/impact.test.ts) | **New.** 10 tests: callers all the way up, paths, tests, entry points, files, hotspots, possible calls, cycles |
+| [web/src/components/ChangeImpact.tsx](web/src/components/ChangeImpact.tsx) | **New.** The section |
+| [web/src/components/CallGraph.tsx](web/src/components/CallGraph.tsx), [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | Shows it under the call lists; types; styles |
+
+**Next:** the chat hook ("what breaks if I change `buildPrompt`?").

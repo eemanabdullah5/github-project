@@ -9,6 +9,8 @@ import { getArchitecture, type ArchitectureMap, type ArchLink, type Repo } from 
 import { githubLineUrl, type LinkTarget } from "../sourceLinks";
 import { Stat } from "./Hotspots";
 import MermaidDiagram from "./MermaidDiagram";
+import { InfoHeading } from "./InfoHelp";
+import { HELP } from "../helpTexts";
 
 interface Props {
   repo: Repo;
@@ -79,13 +81,24 @@ export default function Architecture({ repo }: Props) {
       <div className="stat-row">
         <Stat label="Modules (folders)" value={map.modules.length} />
         <Stat label="Imports between modules" value={importCount} />
-        <Stat label="Module cycles" value={map.cycles.length} warn={map.cycles.length ? "loops between folders" : undefined} />
-        <Stat label="Circular file imports" value={map.fileCycles.length} warn={map.fileCycles.length ? "files importing each other" : undefined} />
+        <Stat
+          label="Module cycles"
+          value={map.cycles.length}
+          warn={map.cycles.length ? "loops between folders" : undefined}
+          help={HELP.architecture.moduleCycles}
+        />
+        <Stat
+          label="Circular file imports"
+          value={map.fileCycles.length}
+          warn={map.fileCycles.length ? "files importing each other" : undefined}
+          help={HELP.architecture.fileCycles}
+        />
         {map.hiddenCoupling && (
           <Stat
             label="Hidden coupling"
             value={map.hiddenCoupling.pairs.length}
             warn={map.hiddenCoupling.pairs.length ? "change together, no import" : undefined}
+            help={HELP.architecture.hiddenCoupling}
           />
         )}
       </div>
@@ -93,11 +106,13 @@ export default function Architecture({ repo }: Props) {
       {/* 2. The map */}
       <section className="panel arch-card" aria-labelledby="arch-map">
         <div className="section-head">
-          <h2 id="arch-map">Module map</h2>
-          <p>
-            Each box is a folder of code. An arrow points from the folder that imports to the folder it uses; the number is how many
-            imports it stands for.
-          </p>
+          <InfoHeading
+            level={2}
+            id="arch-map"
+            title="Module map"
+            help={HELP.architecture.moduleMap}
+          />
+          <p>Arrows point from the folder that imports → the folder it uses.</p>
         </div>
         <MermaidDiagram code={map.mermaid} label={`Module map of ${map.repoId}: ${map.modules.length} modules and ${map.links.length} links`} zoomable />
         <ul className="arch-legend" aria-label="Legend">
@@ -128,11 +143,12 @@ export default function Architecture({ repo }: Props) {
       {(map.cycles.length > 0 || map.fileCycles.length > 0) && (
         <section className="section" aria-labelledby="arch-cycles">
           <div className="section-head">
-            <h2 id="arch-cycles">Cycles</h2>
-            <p>
-              Code that depends on itself in a loop is harder to change, test and split up. Loops between a folder and its own
-              subfolder are common; loops between unrelated folders are more worrying.
-            </p>
+            <InfoHeading
+              level={2}
+              id="arch-cycles"
+              title="Cycles"
+              help={HELP.architecture.cycles}
+            />
           </div>
           <div className="card arch-cycles">
             {map.cycles.map((group) => (
@@ -155,8 +171,12 @@ export default function Architecture({ repo }: Props) {
       {/* 5. Modules table */}
       <section className="section" aria-labelledby="arch-modules">
         <div className="section-head">
-          <h2 id="arch-modules">Modules</h2>
-          <p>"Used by" counts the other folders that depend on this one: the higher it is, the more a change here can affect.</p>
+          <InfoHeading
+            level={2}
+            id="arch-modules"
+            title="Modules"
+            help={HELP.architecture.modules}
+          />
         </div>
         <div className="card table-wrap">
           <table className="data-table">
@@ -249,11 +269,12 @@ function HiddenCouplingSection({ map, fileUrl }: { map: ArchitectureMap; fileUrl
   return (
     <section className="section" aria-labelledby="arch-coupling">
       <div className="section-head">
-        <h2 id="arch-coupling">Hidden coupling</h2>
-        <p>
-          Code files that keep changing in the same commit but don't import each other. Something the code doesn't show ties
-          them together, such as copied logic or a shared data format, so changing only one side can break the other.
-        </p>
+        <InfoHeading
+          level={2}
+          id="arch-coupling"
+          title="Hidden coupling"
+          help={HELP.architecture.hiddenCoupling}
+        />
       </div>
       {body}
       {hc?.partial && <p className="muted small">Only the top pairs were checked. Run Analyse history again to check them all.</p>}

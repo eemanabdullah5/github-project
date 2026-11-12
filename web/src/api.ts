@@ -298,6 +298,40 @@ export function getCallFocus(owner: string, name: string, fn: string, depth: 1 |
   return request(`${repoPath(owner, name)}/calls/focus?fn=${encodeURIComponent(fn)}&depth=${depth}`);
 }
 
+// ---------- Change impact (same shapes as server/src/impact.ts) ----------
+
+/** One affected function: how far it is from the changed one, and the call it makes on the way. */
+export interface ImpactItem {
+  fn: CallFunction;
+  distance: number; // 1 = calls it directly
+  via: string; // the function it calls on the way
+  line: number; // where it makes that call
+  certain: boolean; // false = only reached through a "possible" call
+}
+
+/** A file the change reaches, with its hotspot heat (0 = not a hotspot). */
+export interface ImpactFile {
+  file: string;
+  functions: number;
+  hotspot: 0 | 1 | 2 | 3;
+}
+
+export interface ChangeImpact {
+  commitSha: string;
+  target: CallFunction;
+  affected: ImpactItem[];
+  tests: ImpactItem[];
+  entryPoints: ImpactItem[];
+  files: ImpactFile[];
+  totals: { affected: number; certain: number; tests: number; files: number; hotspotFiles: number; maxDistance: number };
+  more: { affected: number; tests: number };
+}
+
+/** What a change to one function affects, and which tests reach it. */
+export function getCallImpact(owner: string, name: string, fn: string): Promise<ChangeImpact> {
+  return request(`${repoPath(owner, name)}/calls/impact?fn=${encodeURIComponent(fn)}`);
+}
+
 // ---------- Saved chat history (same shapes as server/src/chatHistory.ts) ----------
 
 /** One saved chat, as shown in the "Past chats" list. */
