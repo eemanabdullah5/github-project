@@ -6,11 +6,16 @@
 //  3. Build a prompt: rules + README/file tree + chunks + recent history + the question.
 //  4. Stream the model's answer back, with the list of sources.
 //  5. F3: after the answer, suggest 3 follow-up questions the user might ask next.
+// Call graph phase 4: if the question names a function (e.g. "who calls searchChunks?"), its callers and
+// callees from the call graph are added to the prompt, so the answer lists all of them, not just the ones
+// search happened to find (see callGraphChat.ts).
 // The text of every prompt sent to the AI lives in prompts.ts.
+import { savedCallGraphForChat } from "./callGraph.js";
+import { callGraphContext } from "./callGraphChat.js";
 import { CHARS_PER_TOKEN, HISTORY_TURNS, MAX_README_TOKENS, MAX_TREE_LINES, NUM_CTX, TOP_K } from "./config.js";
 import { AppError } from "./errors.js";
 import { chat, chatStream, embedQuery, type ChatTurn } from "./llm.js";
-import { DEPTH_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, scopeNote, type AnswerDepth } from "./prompts.js";
+import { CALL_GRAPH_RULES, DEPTH_RULES, REWRITE_QUESTION, SYSTEM_RULES, followUpsPrompt, scopeNote, type AnswerDepth } from "./prompts.js";
 import { resolveScope, scopeFilter, type Scope } from "./scope.js";
 import type { ChatMessage, Chunk, Manifest, Source } from "./types.js";
 import { searchChunks } from "./hybridSearch.js";
@@ -61,14 +66,18 @@ export function buildPrompt(input: {
   manifest: Pick<Manifest, "repoId" | "fileTree" | "readme">;
   depth?: AnswerDepth; // F2: answer style. If not given, "technical" is used.
   scope?: Scope | null; // Phase 2: the folder or file the question is limited to, if any
+  callGraph?: string | null; // Call graph phase 4: callers and callees of the functions named in the question
 }): { messages: ChatTurn[]; usedChunks: Chunk[] } {
   // F2: the main rules, followed by the instructions for the chosen answer style.
-  const rules = `${SYSTEM_RULES}\n\n${DEPTH_RULES[input.depth ?? "technical"]}`;
+  // Call graph phase 4: its rules are added only when there's a CALL GRAPH block, so other answers don't change.
+  const rules =
+    `${SYSTEM_RULES}\n\n${DEPTH_RULES[input.depth ?? "technical"]}` + (input.callGraph ? `\n\n${CALL_GRAPH_RULES}` : "");
   const repoContext =
     `Repository: ${input.manifest.repoId}\n\n` +
     (input.scope ? `${scopeNote(input.scope.kind, input.scope.path)}\n\n` : "") +
     `<<<REPO FILE TREE>>>\n${truncateTree(input.manifest.fileTree)}\n<<<END FILE TREE>>>\n\n` +
-    `<<<REPO README>>>\n${truncateReadme(input.manifest.readme) || "(no README)"}\n<<<END README>>>`;
+    `<<<REPO README>>>\n${truncateReadme(input.manifest.readme) || "(no README)"}\n<<<END README>>>` +
+    (input.callGraph ? `\n\n<<<REPO CALL GRAPH>>>\n${input.callGraph}\n<<<END CALL GRAPH>>>` : "");
   const history = recentHistory(input.history);
 
   const budget = NUM_CTX - ANSWER_RESERVE_TOKENS;
@@ -184,8 +193,17 @@ export async function answer(
   const { chunks } = await searchChunks(repoId, `${question}\n${searchQuery}`, vector, TOP_K, scope ? scopeFilter(scope) : undefined);
   // A file in the index with no chunks (e.g. an empty file): say so instead of answering from nothing.
   if (scope && chunks.length === 0) throw new AppError(`There's no indexed code in "${scope.path}" to answer from.`, 400);
-  const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope });
+  // Call graph phase 4: callers and callees of any function the question names. The rewritten question is
+  // checked too, so a follow-up like "and who calls it?" still finds the function.
+  const graph = await savedCallGraphForChat(repoId, manifest.commitSha);
+  const calls = graph ? callGraphContext(graph, `${question}\n${searchQuery}`, scope) : null;
+  const { messages, usedChunks } = buildPrompt({ question, history, chunks, manifest, depth, scope, callGraph: calls?.text });
 
+  // The call graph's lines are sources too, so citations to them are verified. Chunks first, then those.
+  const sources = toSources(usedChunks);
+  for (const s of calls?.sources ?? []) {
+    if (!sources.some((t) => t.path === s.path && t.startLine === s.startLine && t.endLine === s.endLine)) sources.push(s);
+  }
   // `scope` is returned checked and tidied, so the follow-up suggestions can stay inside the same folder.
-  return { sources: toSources(usedChunks), tokens: chatStream(messages), scope };
+  return { sources, tokens: chatStream(messages), scope };
 }

@@ -75,7 +75,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Import graph** ✅ Python + JS/TS | Opus | M | Which file imports which, from tree-sitter. Stored as JSON in `data/graphs/` for now (SQLite later). Go and Java still to do. |
 | **Architecture map** ✅ Done | Opus | M–L | A zoomable module diagram with hotspot overlay, plus cycle detection. |
 | **Hidden coupling** ✅ Done | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
-| **Call graph** | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
+| **Call graph** ✅ Graph, Calls tab and chat (report hook to do) | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
 | **Change impact** | Opus | M | For a changed function: what depends on it, and which tests reach it. |
 | **PR risk briefing** | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
 
@@ -680,3 +680,27 @@ Embedding all 576 from scratch would take about 6 minutes at the same rate. Sear
 | [server/eval/questions.json](server/eval/questions.json) | **New.** 43 questions with their expected files |
 | [server/scripts/evalSearch.ts](server/scripts/evalSearch.ts) | **New.** Runs them on the real index, meaning-only vs hybrid, and prints the results |
 | [package.json](package.json), [server/package.json](server/package.json) | `npm run eval` |
+
+### Call graph — chat hook ✅ (Phase 4, call graph phase 4)
+
+**What:** when a chat question names a function ("who calls `searchChunks`?", "what does answer() call?", "where is `focusGraph` used?"), its callers and callees from the call graph are added to the prompt. The answer then lists **all** of them with clickable, verified citations, instead of only the ones search happened to find.
+
+**Why:** search gives the AI 8 chunks. Callers in other files often don't look like the question, so some were missed, and the AI couldn't know its list was incomplete. The call graph was built by reading every file, so its list is complete (within what tree-sitter matching can see).
+
+**How it works:**
+1. `functionNamesIn()` finds function names in the question and in the rewritten follow-up: code-looking names (`searchChunks`, `load_manifest`), `backticked` names, `name()`, and the word after "calls", "called", "callers of"… Plain English ("how is the answer built?") doesn't count.
+2. `matchFunctions()` keeps only names that are really in the graph: up to 2 functions, one per name. If several functions share a name, it prefers the chosen folder/file, real code over tests, then the most-called, and notes how many were left out.
+3. `callGraphContext()` writes a `<<<REPO CALL GRAPH>>>` block: where the function is defined, up to 8 callers (with the call line) and up to 8 callees, marking test code and "possible" (name-only) matches. Extra rules (`CALL_GRAPH_RULES`) tell the AI to treat these lists as complete. The rules are only added when the block is there, so other answers don't change.
+4. Every line cited in the block is added to the answer's **Sources**, so citations to call sites show as verified, not ⚠.
+5. **No slowdown:** chat only uses a call graph already saved for the indexed commit. If there isn't one (repos indexed before the call graph), it starts building it in the background, and the next question has it.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/callGraphChat.ts](server/src/callGraphChat.ts) | **New.** `functionNamesIn()`, `matchFunctions()`, `callGraphContext()` |
+| [server/src/callGraph.ts](server/src/callGraph.ts) | `savedCallGraphForChat()`: the saved graph if fresh, else a background build |
+| [server/src/rag.ts](server/src/rag.ts) | Adds the block to the prompt and its lines to the sources |
+| [server/src/prompts.ts](server/src/prompts.ts) | `CALL_GRAPH_RULES` |
+| [server/tests/callGraphChat.test.ts](server/tests/callGraphChat.test.ts) | **New.** 11 tests: name finding, matching and ties, the block text, sources, the prompt with and without a block |
+
+**How to demo:** open a repo indexed after the call graph was added (or re-index it) → Chat → ask *"Who calls `searchChunks`?"* → the answer lists every caller with links; open **Sources** to see the call lines. Ask *"and what does it call?"* as a follow-up.

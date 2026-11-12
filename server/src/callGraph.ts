@@ -15,7 +15,7 @@
 // Phase 2: save it (data/callgraphs/<owner>__<repo>.json, built at indexing or on first use), and the data the
 //          API returns: the function list and one function's callers and callees.
 // Phase 3: the diagram for the Calls tab (focusMermaid).
-// Later phases: the chat and report hooks.
+// Phase 4: the chat hook, in callGraphChat.ts ("who calls X?" answered from this graph). Later: the report hook.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Node } from "web-tree-sitter";
@@ -112,7 +112,7 @@ export function isTestFile(filePath: string): boolean {
   return /(^|\/)(tests?|__tests__)\//.test(filePath) || /\.(test|spec)\.[jt]sx?$/.test(filePath) || /(^|\/)test_[^/]*\.py$|_test\.py$/.test(filePath);
 }
 
-/** The name of a function-like node, or null if it isn't one (or is anonymous, like a callback). */
+/** (find functions)-The name of a function-like node, or null if it isn't one (or is anonymous, like a callback). */
 function definitionName(node: Node): string | null {
   switch (node.type) {
     case "function_declaration":
@@ -185,7 +185,7 @@ function createdObject(node: Node): [string, string] | null {
   return null;
 }
 
-/** Reads the imports of a file and records which local names come from which repo file. */
+/** Find imports -Reads the imports of a file and records which local names come from which repo file. */
 function readBindings(root: Node, file: SourceFile, allPaths: Set<string>): Map<string, Binding> {
   const bindings = new Map<string, Binding>();
   for (const node of walk(root)) {
@@ -257,7 +257,7 @@ function* walk(root: Node): Generator<Node> {
   }
 }
 
-/** Reads one file: its functions, classes, imports and the calls inside each function. */
+/** Find classes and parent classes - Reads one file: its functions, classes, imports and the calls inside each function. */
 export async function readCodeFile(file: SourceFile, allPaths: Set<string>): Promise<FileFacts | null> {
   const spec = LANGUAGES[file.language];
   if (!spec || !CODE_LANGUAGES.has(file.language)) return null;
@@ -487,6 +487,19 @@ async function loadCallGraph(repoId: string): Promise<CallGraph | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * For chat (phase 4): the saved call graph if it matches the indexed commit, without building one.
+ * Why: building means downloading the repo, which would hold up the answer. If it's missing or old, a build
+ * starts in the background, so the next question has it. Never throws: chat just answers without it.
+ */
+export async function savedCallGraphForChat(repoId: string, commitSha: string): Promise<CallGraph | null> {
+  const saved = await loadCallGraph(repoId);
+  if (saved && saved.commitSha === commitSha) return saved;
+  const [owner, repo] = repoId.split("/");
+  getCallGraph(owner, repo, repoId).catch(() => {}); // background; the Calls tab shows any error
+  return null;
 }
 
 // Repos whose call graph is being built right now. Why: two requests at once shouldn't both download the repo.
