@@ -1084,6 +1084,121 @@ button.tab.active:hover:not(:disabled) {
   padding-top: 12px;
 }
 
+/* ---------- Usage display (components/UsageInfo.tsx) ---------- */
+
+.usage-note {
+  margin: 8px 0 0;
+}
+
+.usage-info {
+  position: relative;
+  display: inline-block;
+}
+
+/* The count looks like text, with a dotted underline to show it opens.
+   Overrides the global button look (36px tall, orange background on hover). */
+button.usage-trigger,
+button.usage-trigger:hover:not(:disabled) {
+  display: inline;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+/* Hover / open: normal text colour with a solid orange underline, so it stays easy to read. */
+button.usage-trigger:hover:not(:disabled),
+button.usage-trigger[aria-expanded="true"] {
+  color: var(--text);
+  text-decoration: underline solid;
+  text-decoration-color: var(--accent);
+}
+
+.usage-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  display: block;
+  width: 260px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+}
+
+.usage-pop-title {
+  display: block;
+  font-weight: 600;
+}
+
+.usage-bar-caption {
+  display: block;
+  margin: 2px 0 6px;
+  color: var(--tooltip-muted);
+  font-size: 11.5px;
+}
+
+/* Share of prompt / answer / embedding tokens. */
+.usage-bar {
+  display: flex;
+  height: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--tooltip-muted);
+}
+.usage-seg { display: block; height: 100%; }
+.usage-seg.prompt, .usage-dot.prompt { background: var(--accent); }
+.usage-seg.answer, .usage-dot.answer { background: #d9a441; }
+.usage-seg.embed, .usage-dot.embed { background: #7a9e6e; }
+
+.usage-rows {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  row-gap: 3px;
+  column-gap: 8px;
+  align-items: center;
+}
+.usage-row { display: contents; }
+.usage-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+.usage-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.usage-note-text,
+.usage-foot {
+  color: var(--tooltip-muted);
+}
+.usage-row.total > span {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--tooltip-muted) 40%, transparent);
+  font-weight: 600;
+}
+
+.usage-foot {
+  display: block;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
 .sources summary {
   cursor: pointer;
   font-size: 13px;

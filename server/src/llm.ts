@@ -8,11 +8,18 @@ import { config } from "./config.js";
 import { AppError } from "./errors.js";
 import { geminiProvider } from "./llmGemini.js";
 import { ollamaProvider } from "./llmOllama.js";
+import { estimateTokens, recordChat, recordEmbed } from "./usage.js";
 
 /** One message in a conversation sent to the chat model. */
 export interface ChatTurn {
   role: "system" | "user" | "assistant";
   content: string;
+}
+
+/** Token counts reported by the AI service for one chat call. */
+export interface TokenCounts {
+  input: number;
+  output: number;
 }
 
 /** What every provider must be able to do. */
@@ -21,8 +28,8 @@ export interface LlmProvider {
   checkModels(chatModel: string, embedModel: string): Promise<void>;
   /** Turns texts into vectors. "document" for code chunks, "query" for a search question. */
   embed(model: string, texts: string[], kind: "document" | "query"): Promise<number[][]>;
-  /** Streams the chat answer piece by piece. */
-  chatStream(model: string, messages: ChatTurn[]): AsyncIterable<string>;
+  /** Streams the chat answer piece by piece. Calls onUsage with the real token counts, if the service reports them. */
+  chatStream(model: string, messages: ChatTurn[], onUsage?: (u: TokenCounts) => void): AsyncIterable<string>;
 }
 
 /** How many texts are sent to the embedding model in one request. */
@@ -53,7 +60,9 @@ export async function embedDocuments(texts: string[], onProgress?: (done: number
   const model = requireModel("EMBED_MODEL", config.embedModel);
   const vectors: number[][] = [];
   for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
-    vectors.push(...(await provider.embed(model, texts.slice(i, i + EMBED_BATCH_SIZE), "document")));
+    const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
+    vectors.push(...(await provider.embed(model, batch, "document")));
+    recordEmbed(estimateTokens(batch.join("")));
     onProgress?.(vectors.length);
   }
   return vectors;
@@ -63,12 +72,28 @@ export async function embedDocuments(texts: string[], onProgress?: (done: number
 export async function embedQuery(text: string): Promise<number[]> {
   const model = requireModel("EMBED_MODEL", config.embedModel);
   const [vector] = await provider.embed(model, [text], "query");
+  recordEmbed(estimateTokens(text));
   return vector;
 }
 
-/** Sends a conversation to the chat model and yields the answer piece by piece as it is written. */
-export function chatStream(messages: ChatTurn[]): AsyncIterable<string> {
-  return provider.chatStream(requireModel("CHAT_MODEL", config.chatModel), messages);
+/**
+ * Sends a conversation to the chat model and yields the answer piece by piece as it is written.
+ * Records the tokens used (usage.ts): the service's own counts, or an estimate if it gave none (e.g. stopped early).
+ */
+export async function* chatStream(messages: ChatTurn[]): AsyncGenerator<string> {
+  const model = requireModel("CHAT_MODEL", config.chatModel);
+  let reported: TokenCounts | null = null;
+  let text = "";
+  try {
+    for await (const piece of provider.chatStream(model, messages, (u) => (reported = u))) {
+      text += piece;
+      yield piece;
+    }
+  } finally {
+    const counts = reported as TokenCounts | null;
+    if (counts) recordChat(counts.input, counts.output, false);
+    else recordChat(estimateTokens(messages.map((m) => m.content).join("")), estimateTokens(text), true);
+  }
 }
 
 /** Sends a conversation and returns the whole answer at once (used for short helper calls). */

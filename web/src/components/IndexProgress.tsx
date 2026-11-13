@@ -5,6 +5,7 @@
 import { Check } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { getIndexJob, type IndexJob } from "../api";
+import UsageInfo from "./UsageInfo";
 
 const STEPS: Array<{ key: IndexJob["step"]; label: string }> = [
   { key: "downloading", label: "Downloading" },
@@ -100,6 +101,12 @@ export default function IndexProgress({ onReady, onFailed }: Props) {
       {!!job?.reused && job.step !== "downloading" && job.step !== "processing" && job.step !== "failed" && (
         <p className="muted small reuse-note">
           {job.reused} unchanged {job.reused === 1 ? "chunk" : "chunks"} reused · {(job.embedded ?? job.total) === 0 ? "nothing new to embed" : `embedding only the ${job.embedded ?? job.total} new or changed`}
+        </p>
+      )}
+      {/* Usage display: AI tokens used so far by this index. */}
+      {!!job?.usage?.calls && (
+        <p className="muted small">
+          <UsageInfo usage={job.usage} label="AI usage so far: " />
         </p>
       )}
       <div className="progress-row">

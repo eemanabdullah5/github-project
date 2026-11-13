@@ -67,8 +67,13 @@ export async function saveIndex(repoId: string, chunks: Chunk[], vectors: number
   // and the next keyword search tries to build it again.
   await ensureKeywordIndex(repoId, table).catch((err) => console.error("Keyword index not built:", err instanceof Error ? err.message : err));
 
+  await saveManifest(manifest);
+}
+
+/** Writes the repo's manifest (also used at the end of indexing to add the AI usage). */
+export async function saveManifest(manifest: Manifest): Promise<void> {
   await mkdir(MANIFEST_DIR, { recursive: true });
-  await writeFile(manifestPath(repoId), JSON.stringify(manifest, null, 2));
+  await writeFile(manifestPath(manifest.repoId), JSON.stringify(manifest, null, 2));
 }
 
 /**

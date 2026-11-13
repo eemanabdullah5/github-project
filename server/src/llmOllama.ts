@@ -3,7 +3,7 @@
 import { Ollama } from "ollama";
 import { config, NUM_CTX } from "./config.js";
 import { AppError } from "./errors.js";
-import type { ChatTurn, LlmProvider } from "./llm.js";
+import type { ChatTurn, LlmProvider, TokenCounts } from "./llm.js";
 
 const ollama = new Ollama({ host: config.ollamaHost });
 
@@ -64,11 +64,12 @@ export const ollamaProvider: LlmProvider = {
    * Streams the answer. num_ctx is always set: Ollama's default context is small
    * and would silently cut long prompts.
    */
-  async *chatStream(model: string, messages: ChatTurn[]) {
+  async *chatStream(model: string, messages: ChatTurn[], onUsage?: (u: TokenCounts) => void) {
     const stream = await call(model, () => ollama.chat({ model, messages, stream: true, options: { num_ctx: NUM_CTX } }));
     try {
       for await (const part of stream) {
         if (part.message.content) yield part.message.content;
+        if (part.done) onUsage?.({ input: part.prompt_eval_count ?? 0, output: part.eval_count ?? 0 }); // last part has the counts
       }
     } catch (err) {
       throw toAppError(err, model);

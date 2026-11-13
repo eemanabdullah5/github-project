@@ -4,7 +4,7 @@
 import { ApiError, GoogleGenAI, type Content } from "@google/genai";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
-import type { ChatTurn, LlmProvider } from "./llm.js";
+import type { ChatTurn, LlmProvider, TokenCounts } from "./llm.js";
 
 /** The SDK client, created on first use so a missing key gives a clear message instead of a crash. */
 let client: GoogleGenAI | null = null;
@@ -97,12 +97,17 @@ export async function call<T>(model: string, fn: () => Promise<T>): Promise<T> {
  * of text has been sent. After that a retry would repeat the start of the answer on screen,
  * so a failure is reported as an error instead.
  */
-export async function* streamText(model: string, open: () => Promise<AsyncIterable<{ text?: string }>>): AsyncGenerator<string> {
+export async function* streamText(
+  model: string,
+  open: () => Promise<AsyncIterable<StreamPart>>,
+  onUsage?: (u: TokenCounts) => void,
+): AsyncGenerator<string> {
   for (let attempt = 0; ; attempt++) {
     let sentText = false;
     try {
       const stream = await open();
       for await (const part of stream) {
+        if (part.usageMetadata) onUsage?.(toTokenCounts(part.usageMetadata)); // the last part has the full counts
         if (part.text) {
           sentText = true;
           yield part.text;
@@ -115,6 +120,17 @@ export async function* streamText(model: string, open: () => Promise<AsyncIterab
       await waitBeforeRetry(err, wait, attempt);
     }
   }
+}
+
+/** One streamed piece of a Gemini answer: text, and (usually on the last piece) the token counts. */
+interface StreamPart {
+  text?: string;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+}
+
+/** Gemini's counts → ours. Thinking tokens are billed as output, so they count as output. */
+export function toTokenCounts(m: NonNullable<StreamPart["usageMetadata"]>): TokenCounts {
+  return { input: m.promptTokenCount ?? 0, output: (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0) };
 }
 
 /**
@@ -155,9 +171,9 @@ export const geminiProvider: LlmProvider = {
   },
 
   /** Streams the answer piece by piece. Retries temporary errors until the first piece arrives (see streamText). */
-  async *chatStream(model: string, messages: ChatTurn[]) {
+  async *chatStream(model: string, messages: ChatTurn[], onUsage?: (u: TokenCounts) => void) {
     const ai = getClient();
     const { systemInstruction, contents } = toGeminiRequest(messages);
-    yield* streamText(model, () => ai.models.generateContentStream({ model, contents, config: { systemInstruction } }));
+    yield* streamText(model, () => ai.models.generateContentStream({ model, contents, config: { systemInstruction } }), onUsage);
   },
 };

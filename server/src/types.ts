@@ -1,4 +1,5 @@
 // Shared data types (ARCHITECTURE §9).
+import type { Usage } from "./usage.js";
 
 /** A GitHub repository, as shown in the Repo Browser. */
 export interface Repo {
@@ -48,6 +49,7 @@ export interface Manifest {
   chunkCount: number;
   fileTree: string;
   readme: string;
+  usage?: Usage; // AI tokens the last index used (missing for indexes made before this feature)
 }
 
 export type IndexStatus = "missing" | "fresh" | "stale";
@@ -62,6 +64,7 @@ export interface IndexJob {
   total: number;
   reused?: number; // embedding step: chunks that kept their saved vector (unchanged since the last index)
   embedded?: number; // embedding step: chunks sent to the AI (kept after the step, since done/total move on)
+  usage?: Usage; // AI tokens used so far by this job
   error: string | null;
   startedAt: string; // ISO date
 }

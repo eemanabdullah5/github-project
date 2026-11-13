@@ -27,6 +27,7 @@ import { checkIndexStatus, getJob, startIndexJob } from "./indexer.js";
 import type { AnswerDepth } from "./prompts.js";
 import { analyzePullRequest } from "./prRisk.js";
 import { answer, suggestFollowUps } from "./rag.js";
+import { emptyUsage, trackUsage } from "./usage.js";
 import { generateReport, loadReport } from "./report.js";
 import { listFolders } from "./scope.js";
 import type { ChatMessage, Repo } from "./types.js";
@@ -74,6 +75,7 @@ export function createApp() {
         indexedAt: manifest.indexedAt,
         fileCount: manifest.fileCount,
         chunkCount: manifest.chunkCount,
+        usage: manifest.usage ?? null, // AI tokens the last index used
         // Phase 2: for the "Ask about one folder" picker. Files too, so a single file can be picked.
         folders: listFolders(manifest.fileTree),
         files: manifest.fileTree.split("\n").filter(Boolean),
@@ -192,7 +194,7 @@ export function createApp() {
 
   // Chat: body is { question, history, depth, scope, conversationId }. `scope` (optional) limits the search to a
   // folder or file; it's checked against the indexed files in rag.ts. Streams the answer as Server-Sent Events:
-  // "conversation" (which saved chat this goes into), "sources", many "token", "followups" (F3), then "done".
+  // "conversation" (which saved chat this goes into), "sources", many "token", "followups" (F3), "usage", then "done".
   // Or "error" if something fails. The question and answer are saved once the answer has finished.
   app.post("/api/repos/:owner/:repo/chat", async (req, res) => {
     const { owner, repo } = repoParams(req);
@@ -217,6 +219,9 @@ export function createApp() {
     res.on("close", () => (closed = true));
 
     send("conversation", { id: conversationId });
+    // Usage display: every AI call for this answer (rewrite, search, answer, follow-ups) is counted here.
+    const usage = emptyUsage();
+    await trackUsage(usage, async () => {
     try {
       const { sources, tokens, scope: checkedScope } = await answer(toRepoId(owner, repo), question, history, depth, scope);
       send("sources", sources);
@@ -231,19 +236,21 @@ export function createApp() {
       if (!closed) {
         const followUps = await suggestFollowUps(question, answerText, depth, checkedScope);
         send("followups", followUps);
+        send("usage", usage);
         // Save the finished question and answer. Why only now: a half-streamed answer is never saved.
         // A failed save is logged but doesn't spoil the answer the user already has.
         await appendExchange(
           toRepoId(owner, repo),
           conversationId,
           { content: question, scope: checkedScope?.path },
-          { content: answerText, sources, followUps },
+          { content: answerText, sources, followUps, usage },
         ).catch((err) => console.error("Chat not saved:", err instanceof Error ? err.message : err));
       }
       send("done", {});
     } catch (err) {
       send("error", { error: userMessage(err) });
     }
+    });
     res.end();
   });
 

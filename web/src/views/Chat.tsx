@@ -39,6 +39,7 @@ import IndexProgress from "../components/IndexProgress";
 import { useConfirm } from "../components/ConfirmDialog";
 import PastChats from "../components/PastChats";
 import PrRisk from "../components/PrRisk";
+import UsageInfo from "../components/UsageInfo";
 import { CitationWarning, markdownComponents } from "../components/CitationLink";
 import { linkCitations, sourceUrl, type LinkTarget } from "../sourceLinks";
 
@@ -194,6 +195,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
         onToken: (token) => updateLastMessage((m) => ({ ...m, content: m.content + token })),
         // F3: save the suggested questions on the answer, so they show under it.
         onFollowUps: (followUps) => updateLastMessage((m) => ({ ...m, followUps })),
+        onUsage: (usage) => updateLastMessage((m) => ({ ...m, usage })),
       });
     } catch (err) {
       setError((err as Error).message);
@@ -263,6 +265,12 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
                     <>
                       <span aria-hidden="true">·</span>
                       <span>{status.manifest.fileCount} files</span>
+                    </>
+                  )}
+                  {status?.manifest?.usage && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <UsageInfo usage={status.manifest.usage} label="last index " />
                     </>
                   )}
                 </p>
@@ -402,6 +410,12 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
                         ))}
                       </ul>
                     </details>
+                  )}
+                  {/* Usage display: tokens (and cost, if prices are set) this answer used. Hover or click for the breakdown. */}
+                  {finished && m.usage && (
+                    <div className="usage-note muted small">
+                      <UsageInfo usage={m.usage} />
+                    </div>
                   )}
                   {/* F3: suggested questions. Only under the latest answer, and only after it has finished.
                       Clicking one asks it straight away. */}

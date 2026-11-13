@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DATA_DIR } from "./config.js";
 import type { ChatMessage, Source } from "./types.js";
+import type { Usage } from "./usage.js";
 
 const CHATS_DIR = path.join(DATA_DIR, "chats");
 
@@ -25,6 +26,7 @@ const TITLE_LENGTH = 60;
 export interface SavedMessage extends ChatMessage {
   sources?: Source[]; // answers: the code the AI was given (for citation links)
   followUps?: string[]; // answers: the suggested next questions
+  usage?: Usage; // answers: AI tokens used
   scope?: string; // questions: the "Search in" folder or file, if one was picked
   at: string; // when it was saved
 }

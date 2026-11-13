@@ -40,6 +40,12 @@ export const config = {
   // Local only (DECISIONS D14): never bind to 0.0.0.0.
   host: "127.0.0.1",
   port: Number(env("PORT", "3001")),
+  // Usage and cost display: US dollars per million tokens, from your provider's price page. Empty = tokens only, no cost.
+  prices: {
+    input: Number(env("PRICE_INPUT_PER_M", "0")) || 0,
+    output: Number(env("PRICE_OUTPUT_PER_M", "0")) || 0,
+    embed: Number(env("PRICE_EMBED_PER_M", "0")) || 0,
+  },
 };
 
 // GitHub

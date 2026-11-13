@@ -65,7 +65,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Index-time folder summaries** ✅ Done | Opus | M | While indexing, write a short summary of each folder and store it as a searchable document. Big-picture questions then use these summaries. Per folder rather than per file, to stay within Gemini's free-tier limits. |
 | **Saved chat history** ✅ Done | PRD | M | Keep conversations per repo across sessions, in SQLite (`better-sqlite3`). The same database can later hold the code graph. |
 | **Incremental re-index** ✅ Done | Opus + Claude Code | M | Re-embed only files whose content changed since the last index. |
-| **Usage and cost display** | Claude Code | S | Show the Gemini tokens used per answer and per index. |
+| **Usage and cost display** ✅ Done | Claude Code | S | Show the Gemini tokens used per answer and per index. |
 | **Dependency scan** ✅ Done | Claude Code | S–M | Read `package.json`, `requirements.txt`, `go.mod`, `pom.xml` and similar files directly, to give exact dependencies and versions without relying on the AI. |
 
 ## Phase 4 — Code graph and architecture (~3–5 weeks)
@@ -559,6 +559,36 @@ The AI is also given the exact list, so its "Tech stack" and "Dependencies" text
 | [server/tests/report.test.ts](server/tests/report.test.ts) | 5 tests: grouping, the section (warnings, errors, escaping `\|`), empty and failed scans, the AI prompt, citation clean-up |
 
 **How to demo:** open a repo → **Report** → **Regenerate** → scroll to *Dependencies*. Point out the counts, the per-language table, and the "Tech stack" section quoting the same versions.
+
+### Usage and cost display ✅ (Phase 3)
+
+**What:** each chat answer shows how many AI tokens it used, and the cost if prices are set. The repo bar shows what the last index used, and the indexing panel shows a live count. Hover, click or tap any of them for a details box: a bar showing the share of prompt, answer (including thinking) and embedding tokens, each count, the total, the number of AI calls, and the cost.
+
+**Why:** the app runs on Gemini's free tier, which has rate limits, and could move to a paid plan. This shows what each answer and each index really uses (for example, how much folder summaries add to an index), so the cost of a paid plan or a shared install can be judged from real numbers.
+
+**How it works:**
+1. `usage.ts` keeps a *meter*. `trackUsage(meter, fn)` runs the work with that meter (Node's `AsyncLocalStorage`), so every AI call inside it is counted, even after awaits. No meter has to be passed through rag.ts, the indexer or folderSummaries.ts.
+2. `llm.ts` records every call. For chat it uses the real counts the service sends back: Gemini's `usageMetadata` (thinking tokens count as output, because they're billed as output) or Ollama's `prompt_eval_count`/`eval_count`. If none arrive (for example the user left mid-answer), it estimates from text length and marks the usage with "~".
+3. Gemini doesn't return token counts for embeddings, so those are always estimated (4 characters ≈ 1 token) and labelled as estimated.
+4. **Chat:** the chat route runs the whole answer under one meter: rewriting the question, embedding it, the answer and the follow-up suggestions. It sends a `usage` event before `done` and saves it with the answer, so past chats show it too.
+5. **Index:** the index job runs under its own meter (`job.usage`), so the progress panel can show it live. At the end it's saved in the manifest and shown in the repo bar as "last index …".
+6. **Cost:** `PRICE_INPUT_PER_M`, `PRICE_OUTPUT_PER_M` and `PRICE_EMBED_PER_M` in `.env` (US dollars per million tokens). They're empty by default, so only tokens are shown. Prices aren't built in because they change and differ per model.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/usage.ts](server/src/usage.ts) | **New.** The meter, `trackUsage()`, `recordChat()`, `recordEmbed()`, `costOf()` |
+| [server/src/llm.ts](server/src/llm.ts) | Records each chat and embedding call; estimates if no counts came back |
+| [server/src/llmGemini.ts](server/src/llmGemini.ts), [server/src/llmOllama.ts](server/src/llmOllama.ts) | Pass the service's token counts back (`toTokenCounts()` for Gemini) |
+| [server/src/app.ts](server/src/app.ts) | Chat runs under a meter and sends a `usage` event; status returns the last index's usage |
+| [server/src/indexer.ts](server/src/indexer.ts), [server/src/vectorStore.ts](server/src/vectorStore.ts) | The job runs under a meter; `saveManifest()` stores the usage |
+| [server/src/chatHistory.ts](server/src/chatHistory.ts), [server/src/types.ts](server/src/types.ts), [server/src/config.ts](server/src/config.ts) | Usage saved with answers; types; `PRICE_*` settings |
+| [web/src/usage.ts](web/src/usage.ts) | **New.** Formats the short line ("5,210 tokens · $0.0012") |
+| [web/src/components/UsageInfo.tsx](web/src/components/UsageInfo.tsx) | **New.** The count plus its details box: opens on hover, click pins it open, Esc or a click outside closes it |
+| [web/src/views/Chat.tsx](web/src/views/Chat.tsx), [web/src/components/IndexProgress.tsx](web/src/components/IndexProgress.tsx), [web/src/api.ts](web/src/api.ts), [web/src/index.css](web/src/index.css) | Shows it under answers, in the repo bar and in the indexing panel |
+| [server/tests/usage.test.ts](server/tests/usage.test.ts) | **New.** 7 tests: counting across awaits, estimates, separate meters, cost, Gemini thinking tokens |
+
+**How to demo:** ask a question → the token count appears under the answer (hover for the breakdown). Re-index → watch "AI usage so far" climb, then see "last index …" in the repo bar. Add prices to `.env` and restart to see costs.
 
 ### Index-time folder summaries ✅ (Phase 3)
 

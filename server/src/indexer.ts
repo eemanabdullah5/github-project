@@ -14,7 +14,8 @@ import { checkRepoSize, extractSourceFiles } from "./ingestion.js";
 import { checkModels, embedDocuments } from "./llm.js";
 import { planEmbedding } from "./reuseEmbeddings.js";
 import type { IndexJob, IndexStatus, Manifest, SourceFile } from "./types.js";
-import { loadManifest, loadSavedVectors, saveIndex } from "./vectorStore.js";
+import { emptyUsage, trackUsage } from "./usage.js";
+import { loadManifest, loadSavedVectors, saveIndex, saveManifest } from "./vectorStore.js";
 
 /** The current (or last finished) job. Lives in memory only, so a server restart forgets it. */
 let job: IndexJob | null = null;
@@ -45,10 +46,12 @@ export function startIndexJob(owner: string, repo: string): IndexJob {
     total: 0,
     error: null,
     startedAt: new Date().toISOString(),
+    usage: emptyUsage(),
   };
   job = current;
 
-  runJob(current, owner, repo).catch((err) => {
+  // Usage display: every AI call in the job is counted in current.usage.
+  trackUsage(current.usage!, () => runJob(current, owner, repo)).catch((err) => {
     current.step = "failed";
     current.error =
       err instanceof AppError ? err.message : "Indexing failed because of an unexpected error. Please try again.";
@@ -150,6 +153,11 @@ async function runJob(current: IndexJob, owner: string, repo: string): Promise<v
   } catch (err) {
     console.error("Call graph failed:", err instanceof Error ? err.message : err);
   }
+
+  // Save the AI usage with the manifest, so the repo bar can show what the last index used.
+  await saveManifest({ ...manifest, usage: current.usage }).catch((err) =>
+    console.error("Usage not saved:", err instanceof Error ? err.message : err),
+  );
   current.step = "ready";
 }
 

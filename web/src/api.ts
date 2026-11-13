@@ -18,6 +18,16 @@ export interface Repo {
 
 export type IndexStatus = "missing" | "fresh" | "stale";
 
+/** AI tokens used by one answer or one index (same shape as server/src/usage.ts). */
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+  embedTokens: number;
+  calls: number;
+  estimated: boolean; // prompt/answer counts estimated from text length
+  cost: number | null; // US dollars, or null if no prices are set in .env
+}
+
 export interface StatusResponse {
   status: IndexStatus;
   manifest: {
@@ -26,6 +36,7 @@ export interface StatusResponse {
     indexedAt: string;
     fileCount: number;
     chunkCount: number;
+    usage: Usage | null; // AI tokens the last index used (null for older indexes)
     folders: string[]; // Phase 2: folders with indexed files, for the "Ask about one folder" picker
     files: string[]; // … and the indexed files themselves
   } | null;
@@ -38,6 +49,7 @@ export interface IndexJob {
   total: number;
   reused?: number; // embedding: unchanged chunks that kept their saved vector (re-index)
   embedded?: number; // embedding: chunks sent to the AI (kept after the step ends)
+  usage?: Usage; // AI tokens used so far
   error: string | null;
   startedAt: string;
 }
@@ -97,6 +109,7 @@ export interface ChatMessage {
   sources?: Source[];
   followUps?: string[]; // F3: suggested next questions, shown as buttons under the latest answer
   scope?: string; // Phase 2: on a question, the folder or file it was limited to (shown as a tag)
+  usage?: Usage; // on an answer: AI tokens it used
 }
 
 /**
@@ -207,6 +220,7 @@ export async function streamChat(
     onSources: (sources: Source[]) => void;
     onToken: (text: string) => void;
     onFollowUps: (questions: string[]) => void; // F3: called once, after the answer is complete
+    onUsage?: (usage: Usage) => void; // called once, after the follow-ups
   },
 ): Promise<void> {
   let res: Response;
@@ -239,6 +253,7 @@ export async function streamChat(
       if (event === "sources") handlers.onSources(data);
       if (event === "token") handlers.onToken(data);
       if (event === "followups") handlers.onFollowUps(data); // F3
+      if (event === "usage") handlers.onUsage?.(data);
       if (event === "error") throw new Error(data.error);
       if (event === "done") return;
     }

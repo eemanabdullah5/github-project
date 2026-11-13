@@ -106,7 +106,7 @@ describe("POST /api/repos/:owner/:repo/index", () => {
 });
 
 describe("POST /api/repos/:owner/:repo/chat", () => {
-  it("streams sources, tokens, follow-ups (F3), then done", async () => {
+  it("streams sources, tokens, follow-ups (F3), usage, then done", async () => {
     const res = await fetch(`${baseUrl}/api/repos/octo/hello/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -114,7 +114,7 @@ describe("POST /api/repos/:owner/:repo/chat", () => {
     });
     expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
     const events = (await res.text()).trim().split("\n\n").map((e) => e.split("\n")[0]);
-    expect(events).toEqual(["event: conversation", "event: sources", "event: token", "event: token", "event: followups", "event: done"]);
+    expect(events).toEqual(["event: conversation", "event: sources", "event: token", "event: token", "event: followups", "event: usage", "event: done"]);
   });
 
   // F2: the answer style from the browser reaches rag.answer() (4th argument).
