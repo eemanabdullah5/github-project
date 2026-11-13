@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   REPORT_SECTIONS,
   buildReportPrompt,
+  callGraphSection,
+  mostConnected,
   factsSection,
   hotspotsSection,
   languageBreakdown,
@@ -14,6 +16,7 @@ import {
   structureSection,
 } from "../src/report.js";
 import { buildArchitecture } from "../src/architecture.js";
+import type { CallGraph } from "../src/callGraph.js";
 import type { DependencyScan } from "../src/dependencies.js";
 import type { Chunk, HistoryReport, ImportGraph, Manifest } from "../src/types.js";
 
@@ -297,5 +300,46 @@ describe("removeDependencyCitations", () => {
     expect(removeDependencyCitations("Express 5 [README.md:L1-L2, Dependency files].")).toBe("Express 5 [README.md:L1-L2].");
     expect(removeDependencyCitations("React 19 [Dependency files].")).toBe("React 19.");
     expect(removeDependencyCitations("Uses [a.ts:L1-L3] and [b.ts:L4].")).toBe("Uses [a.ts:L1-L3] and [b.ts:L4].");
+  });
+});
+
+describe("callGraphSection (Phase 4 call graph in the report)", () => {
+  // util is called by a and b; route calls a; a test calls b.
+  const fn = (id: string, isTest = false) => ({
+    id: `src/lib.ts#${id}`, name: id, qualified: id, file: isTest ? "tests/lib.test.ts" : "src/lib.ts",
+    line: 1, endLine: 5, kind: "function" as const, isTest,
+  });
+  const edge = (from: string, to: string) => ({ from: `src/lib.ts#${from}`, to: `src/lib.ts#${to}`, line: 2, count: 1, certain: true });
+  const graph: CallGraph = {
+    repoId: "octo/hello", commitSha: "abc", generatedAt: "2026-01-01",
+    functions: [fn("util"), fn("a"), fn("b"), fn("route"), fn("t", true)],
+    edges: [edge("a", "util"), edge("b", "util"), edge("route", "a"), edge("t", "b")],
+    stats: { calls: 4, certain: 4, possible: 0, dropped: 0 },
+  };
+
+  it("ranks functions by how far a change spreads, leaving out tests", () => {
+    const rows = mostConnected(graph);
+    expect(rows.map((r) => [r.fn.name, r.directCallers, r.impact.affected, r.impact.tests])).toEqual([
+      ["util", 2, 3, 1],
+      ["a", 1, 1, 0],
+      ["b", 1, 0, 1],
+    ]);
+  });
+
+  it("writes the table, flags untested functions and returns their locations as sources", () => {
+    const { text, sources } = callGraphSection(graph);
+    expect(text).toContain("Read 5 functions and 4 links between them");
+    expect(text).toContain("1. **`util`** [src/lib.ts:L1-L5]  \n   Called directly by 2 functions · a change reaches 3 functions in 1 file · 1 test reaches it");
+    expect(text).toContain("2. **`a`** [src/lib.ts:L1-L5]  \n   Called directly by 1 function · a change reaches 1 function in 1 file · ⚠ **no test reaches it**");
+    expect(text).not.toContain("|");
+    expect(text).toContain("1 of these 3 functions isn't reached by any test:** `a`");
+    expect(sources).toHaveLength(3);
+    expect(sources[0]).toEqual({ path: "src/lib.ts", startLine: 1, endLine: 5, symbol: "util" });
+  });
+
+  it("says so when there's no graph or nothing to rank", () => {
+    expect(callGraphSection(null).text).toContain("couldn't be built");
+    expect(callGraphSection({ ...graph, functions: [], edges: [] }).text).toContain("No Python, JavaScript or TypeScript functions");
+    expect(callGraphSection({ ...graph, edges: [] }).text).toContain("nothing to rank");
   });
 });

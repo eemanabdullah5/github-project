@@ -75,7 +75,7 @@ How each one works is written up under [Implementation notes](#implementation-no
 | **Import graph** ✅ Python + JS/TS | Opus | M | Which file imports which, from tree-sitter. Stored as JSON in `data/graphs/` for now (SQLite later). Go and Java still to do. |
 | **Architecture map** ✅ Done | Opus | M–L | A zoomable module diagram with hotspot overlay, plus cycle detection. |
 | **Hidden coupling** ✅ Done | Opus | S (after the import graph) | Files that change together (from F4) but have no import between them. These are usually real design problems. |
-| **Call graph** ✅ Graph, Calls tab and chat (report hook to do) | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
+| **Call graph** ✅ Graph, Calls tab, chat and report | Opus | L | "Who calls this function?" answered from the graph instead of from search. |
 | **Change impact** ✅ Calls tab and chat | Opus | M | For a changed function: what depends on it, and which tests reach it. |
 | **PR risk briefing** ✅ Done | Opus | M | A one-screen summary of a pull request with a transparent risk score and suggested reviewers. |
 
@@ -740,6 +740,28 @@ Embedding all 576 from scratch would take about 6 minutes at the same rate. Sear
 | [server/eval/questions.json](server/eval/questions.json) | **New.** 43 questions with their expected files |
 | [server/scripts/evalSearch.ts](server/scripts/evalSearch.ts) | **New.** Runs them on the real index, meaning-only vs hybrid, and prints the results |
 | [package.json](package.json), [server/package.json](server/package.json) | `npm run eval` |
+
+### Call graph — report hook ✅ (Phase 4)
+
+**What:** the health report has a new **Most connected code** section. It lists the 5 functions a change would spread furthest from: how many functions call each one directly, how many functions and files a change would reach (and how many of those files are hotspots), and how many tests reach it. Functions that no test reaches are flagged, with a line naming them as good first places to add tests.
+
+**Why:** leaders read the report more than the Calls tab. This puts the call graph's most useful finding there: "this is code a lot depends on, and nothing tests it."
+
+**How it works:**
+1. `listFunctions()` ranks functions by how many others call them directly. The top 30 are kept, leaving out test code and top-level script code.
+2. For each of those, `changeImpact()` (the same code as the Calls tab) follows callers back through the graph to count every function and file a change reaches, and the tests that reach it.
+3. `mostConnected()` sorts them by reach and keeps the top 5. `callGraphSection()` writes them as a numbered list (not a table, which the report page can't show yet) plus the warning line.
+4. Each function is cited as `[file:Lstart-Lend]`, and those locations are added to the report's sources, so they show as GitHub links and count as verified.
+5. No AI is used, so the numbers are exact and it adds no tokens. It takes about 25 ms on a 500-function repo.
+6. The call graph is the one saved at indexing. For older repos it's built when the report is generated. If it can't be built, the section says so and the rest of the report still works.
+
+**Where the code is:**
+| File | What changed |
+|---|---|
+| [server/src/report.ts](server/src/report.ts) | `mostConnected()`, `callGraphSection()`; the section goes after the architecture map |
+| [server/tests/report.test.ts](server/tests/report.test.ts) | 3 tests: ranking, the list and warning, sources, and the empty cases |
+
+**How to demo:** open **Report** → **Regenerate** → scroll to *Most connected code*. On this repo it flags `repoPath` and `request` in `web/src/api.ts`: each is reached by 36–38 functions, and no test reaches them.
 
 ### Call graph — chat hook ✅ (Phase 4, call graph phase 4)
 

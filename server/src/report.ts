@@ -6,16 +6,20 @@
 //  - Hotspots and knowledge risk: copied word for word from the F4 git history analysis, no AI.
 //  - Code structure and architecture map: from the import graph (Phase 4), no AI. The map is a Mermaid
 //    diagram, which the app draws and GitHub shows as a picture in the downloaded file.
+//  - Most connected code: from the call graph (Phase 4), no AI. The functions a change would spread furthest
+//    from, and whether any test reaches them (change impact, impact.ts).
 //  - Dependencies: the exact libraries and versions from the dependency files (dependencies.ts), no AI.
 //    The AI also gets this list, so its "Tech stack" and "Dependencies" text matches it.
 // The report is saved in data/reports/, so opening it again is instant. "Regenerate" makes a new one.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildArchitecture, type ArchitectureMap } from "./architecture.js";
+import { getCallGraph, listFunctions, type CallFunction, type CallGraph } from "./callGraph.js";
 import { CHARS_PER_TOKEN, DATA_DIR, NUM_CTX } from "./config.js";
 import { getDependencies, isUnpinned, type Dependency, type DependencyScan, type Ecosystem } from "./dependencies.js";
 import { AppError } from "./errors.js";
 import { loadHistory } from "./gitHistory.js";
+import { changeImpact, type ChangeImpact } from "./impact.js";
 import { getGraph, summarizeGraph } from "./importGraph.js";
 import { detectLanguage } from "./ingestion.js";
 import { chat, embedQuery, type ChatTurn } from "./llm.js";
@@ -248,6 +252,91 @@ export function hiddenCouplingLines(map: ArchitectureMap): string[] {
   return lines;
 }
 
+// ---------- Most connected code (from the call graph, no AI) ----------
+
+/** Functions checked for reach (the most-called ones), and how many are shown. */
+const CALL_CANDIDATES = 30;
+const CALL_ROWS = 5;
+
+/** One row of the "Most connected code" section. */
+export interface ConnectedFunction {
+  fn: CallFunction;
+  directCallers: number; // functions that call it directly
+  impact: ChangeImpact["totals"];
+}
+
+/**
+ * The functions whose change would reach the most other code, with the tests that reach them.
+ * Only real code (no tests, no top-level script code). Ranked by how many functions a change reaches.
+ */
+export function mostConnected(graph: CallGraph, history: HistoryReport | null = null): ConnectedFunction[] {
+  return listFunctions(graph)
+    .filter((f) => !f.isTest && f.kind !== "top-level" && f.callers > 0)
+    .slice(0, CALL_CANDIDATES)
+    .map((f) => ({ fn: f as CallFunction, directCallers: f.callers, impact: changeImpact(graph, f.id, history).totals }))
+    .sort((a, b) => b.impact.affected - a.impact.affected || b.directCallers - a.directCallers || a.fn.id.localeCompare(b.fn.id))
+    .slice(0, CALL_ROWS);
+}
+
+/**
+ * The "Most connected code" section: the functions a change would spread furthest from, and whether tests reach them.
+ * Returns the text and the function locations, so their citations become links (and count as verified).
+ */
+export function callGraphSection(graph: CallGraph | null, history: HistoryReport | null = null): { text: string; sources: Source[] } {
+  const lines = ["## Most connected code (from the call graph)", ""];
+  const done = (sources: Source[] = []) => ({ text: lines.join("\n").trimEnd(), sources });
+  if (!graph) {
+    lines.push("_The call graph couldn't be built for this repo, so this section is missing. Try regenerating the report._");
+    return done();
+  }
+  if (graph.functions.length === 0) {
+    lines.push("_No Python, JavaScript or TypeScript functions found, so there's no call graph yet (other languages come later)._");
+    return done();
+  }
+  const rows = mostConnected(graph, history);
+  lines.push(`Read ${plural(graph.functions.length, "function")} and ${plural(graph.edges.length, "link")} between them (one function calling another).`, "");
+  if (rows.length === 0) {
+    lines.push("No function is called by other code in the repo, so there's nothing to rank.");
+    return done();
+  }
+
+  lines.push(
+    "**Functions a change would spread furthest from** (\"reaches\" = every function that calls it, directly or through others):",
+    "",
+  );
+  // A numbered list, not a table: it reads well in the app, the downloaded file and on GitHub.
+  const sources: Source[] = [];
+  rows.forEach(({ fn, directCallers, impact }, i) => {
+    sources.push({ path: fn.file, startLine: fn.line, endLine: fn.endLine, symbol: fn.qualified });
+    const possible = impact.affected - impact.certain;
+    const hotspots = impact.hotspotFiles ? `, ${plural(impact.hotspotFiles, "hotspot")}` : "";
+    const tests = impact.tests ? `${plural(impact.tests, "test")} ${impact.tests === 1 ? "reaches" : "reach"} it` : "⚠ **no test reaches it**";
+    lines.push(
+      `${i + 1}. **\`${fn.qualified}\`** [${fn.file}:L${fn.line}-L${fn.endLine}]  `,
+      `   Called directly by ${plural(directCallers, "function")} · a change reaches ${plural(impact.affected, "function")}` +
+        `${possible ? ` (${possible} possible)` : ""} in ${plural(impact.files, "file")}${hotspots} · ${tests}`,
+    );
+  });
+
+  const untested = rows.filter((r) => r.impact.tests === 0);
+  lines.push("");
+  if (untested.length) {
+    const names = untested.map((r) => `\`${r.fn.qualified}\``).join(", ");
+    const worst = Math.max(...untested.map((r) => r.impact.affected));
+    lines.push(
+      `⚠ **${untested.length} of these ${plural(rows.length, "function")} ${untested.length === 1 ? "isn't" : "aren't"} reached by any test:** ${names}. ` +
+        `A mistake there could break up to ${plural(worst, "function")} without any test failing. These are good first places to add tests.`,
+    );
+  } else {
+    lines.push("Every function listed is reached by at least one test.");
+  }
+  lines.push(
+    "",
+    "_From parsing the code, not running it. \"Possible\" calls were matched by method name only, and calls made in unusual ways can be missed. Open the **Calls** tab for the full picture of any function._",
+  );
+  return done(sources);
+}
+
 // ---------- Dependencies (from dependencies.ts, no AI) ----------
 
 /** Display names for each kind of dependency file. */
@@ -464,6 +553,8 @@ export async function generateReport(repoId: string): Promise<HealthReport> {
     // 3. Put the report together: title, facts, the AI's sections, then the git history section.
     // Phase 4: the import graph (built during indexing, or now for repos indexed before this feature).
     const graph = await getGraph(owner, name, repoId).catch(() => null);
+    // Call graph: built during indexing, or now for older repos. Optional: the report works without it.
+    const calls = callGraphSection(await getCallGraph(owner, name, repoId).catch(() => null), history);
     const markdown = [
       `# Health report: ${manifest.repoId}`,
       `_Generated ${new Date().toISOString().slice(0, 10)} by the GitHub Repository AI Assistant._`,
@@ -472,6 +563,7 @@ export async function generateReport(repoId: string): Promise<HealthReport> {
       dependenciesSection(deps),
       structureSection(graph),
       architectureSection(graph && buildArchitecture(graph, history)),
+      calls.text,
       hotspotsSection(history),
     ]
       .filter(Boolean) // the architecture section is empty when there's nothing to draw
@@ -483,7 +575,7 @@ export async function generateReport(repoId: string): Promise<HealthReport> {
       commitSha: manifest.commitSha,
       generatedAt: new Date().toISOString(),
       markdown,
-      sources: toSources(usedChunks),
+      sources: [...toSources(usedChunks), ...calls.sources], // function locations too, so their citations are links
     };
     await mkdir(REPORTS_DIR, { recursive: true });
     await writeFile(reportPath(repoId), JSON.stringify(report, null, 2));
