@@ -1066,10 +1066,14 @@ button.tab.active:hover:not(:disabled) {
   color: var(--muted);
 }
 
+/* Tables (remark-gfm). Wide ones scroll sideways instead of squashing the columns. */
 .markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 0 0 14px;
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 .markdown th,
@@ -1077,6 +1081,21 @@ button.tab.active:hover:not(:disabled) {
   border: 1px solid var(--border);
   padding: 6px 10px;
   text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--surface-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.markdown tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-2) 40%, transparent);
+}
+
+.markdown td code {
+  white-space: nowrap;
 }
 
 .sources {

@@ -17,6 +17,7 @@ import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, CircleDashed, Folde
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import {
   deleteChat,
   deleteChats,
@@ -385,7 +386,7 @@ export default function Chat({ repo, messages, setMessages, conversationId, setC
                     // No rehype-raw: raw HTML in model output is never rendered (ARCHITECTURE §13).
                     // F1: linkCitations turns [file:L10-L16] in the answer into GitHub links before showing it.
                     <div className="markdown">
-                      <ReactMarkdown rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
                         {linkCitations(m.content, linkTarget, m.sources ?? [])}
                       </ReactMarkdown>
                     </div>

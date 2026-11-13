@@ -4,6 +4,7 @@
 import { AlertCircle, Download, Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { generateReport, getReport, type HealthReport as Report, type Repo } from "../api";
 import { CitationWarning, markdownComponents } from "./CitationLink";
 import MermaidDiagram from "./MermaidDiagram";
@@ -150,7 +151,8 @@ export default function HealthReport({ repo }: Props) {
       <article className="report-page">
         <CitationWarning markdown={report.markdown} sources={report.sources} />
         <div className="markdown">
-          <ReactMarkdown components={reportComponents}>{linkedMarkdown}</ReactMarkdown>
+          {/* remark-gfm: tables (e.g. Dependencies), which plain Markdown doesn't support. */}
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={reportComponents}>{linkedMarkdown}</ReactMarkdown>
         </div>
       </article>
     </div>
